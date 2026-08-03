@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\OriginalCircuit.Altium\OriginalCircuit.Altium.csproj" />
+    <ProjectReference Include="..\..\src\OriginalCircuit.Altium.Rendering.Core\OriginalCircuit.Altium.Rendering.Core.csproj" />
+    <ProjectReference Include="..\..\src\OriginalCircuit.Altium.Rendering.Svg\OriginalCircuit.Altium.Rendering.Svg.csproj" />
+    <!-- Referenced directly (not just transitively) because Program.cs uses EdaColor/RenderOptions
+         directly; the src/* projects mark these PrivateAssets="all" so they don't leak into
+         consumers of the packed NuGet packages, which means they aren't reliably visible transitively
+         to a plain ProjectReference consumer either. -->
+    <ProjectReference Include="..\..\shared\OriginalCircuit.Eda.Abstractions\src\OriginalCircuit.Eda.Abstractions\OriginalCircuit.Eda.Abstractions.csproj" />
+    <ProjectReference Include="..\..\shared\OriginalCircuit.Eda.Rendering\src\OriginalCircuit.Eda.Rendering.Core\OriginalCircuit.Eda.Rendering.Core.csproj" />
+  </ItemGroup>
+</Project>

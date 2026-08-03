@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>OriginalCircuit.Altium.Rendering.Svg</name>
+    </assembly>
+    <members>
+        <member name="T:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer">
+            <summary>
+            Renders components and whole documents to SVG vector graphics.
+            </summary>
+            <remarks>
+            The SVG is built in memory and written to the output stream asynchronously, so the renderer
+            works with streams that disallow synchronous I/O (e.g. an ASP.NET response body).
+            </remarks>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer.RenderAsync(OriginalCircuit.Eda.Models.IComponent,System.IO.Stream,OriginalCircuit.Eda.Rendering.RenderOptions,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer.RenderGroupedByLayerAsync(OriginalCircuit.Altium.Models.Pcb.PcbComponent,System.IO.Stream,OriginalCircuit.Eda.Rendering.RenderOptions,OriginalCircuit.Altium.Rendering.PcbViewSide,System.Threading.CancellationToken)">
+            <summary>
+            Renders a single PCB component (footprint), same as <see cref="M:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer.RenderAsync(OriginalCircuit.Eda.Models.IComponent,System.IO.Stream,OriginalCircuit.Eda.Rendering.RenderOptions,System.Threading.CancellationToken)"/>,
+            except each PCB layer's primitives are wrapped in a named SVG group (<c>&lt;g id="layer-33"&gt;</c>).
+            A front-end can then toggle individual layers on/off client-side, with no server round-trip — the
+            same trick <see cref="M:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer.RenderRealisticAsync(OriginalCircuit.Altium.Models.Pcb.PcbDocument,System.IO.Stream,OriginalCircuit.Eda.Rendering.RenderOptions,OriginalCircuit.Altium.Rendering.PcbRealisticStyle,System.Threading.CancellationToken)"/>
+            uses for its physical (substrate/copper/soldermask/...) groups.
+            </summary>
+            <param name="component">The PCB component (footprint) to render.</param>
+            <param name="output">The stream the SVG is written to.</param>
+            <param name="options">Width/height/background; null uses the defaults.</param>
+            <param name="viewSide">Which side's layers to include; <see cref="F:OriginalCircuit.Altium.Rendering.PcbViewSide.Both"/> (the default)
+            shows every layer the footprint uses, which is usually what you want for a library footprint.</param>
+            <returns>The distinct PCB layer IDs that were drawn, in the order their groups appear in the SVG —
+            pass each through <see cref="M:OriginalCircuit.Altium.Rendering.LayerColors.GetName(System.Int32)"/> / <see cref="M:OriginalCircuit.Altium.Rendering.LayerColors.GetColor(System.Int32)"/> to build a
+            layer-visibility UI.</returns>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer.RenderAsync(OriginalCircuit.Altium.Models.Pcb.PcbDocument,System.IO.Stream,OriginalCircuit.Eda.Rendering.RenderOptions,OriginalCircuit.Altium.Rendering.PcbRenderSettings,System.Threading.CancellationToken)">
+            <summary>Renders a whole PCB document (board) to SVG.</summary>
+            <param name="settings">Optional view-side and layer-visibility settings; null renders a top view with every layer.</param>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer.RenderRealisticAsync(OriginalCircuit.Altium.Models.Pcb.PcbDocument,System.IO.Stream,OriginalCircuit.Eda.Rendering.RenderOptions,OriginalCircuit.Altium.Rendering.PcbRealisticStyle,System.Threading.CancellationToken)">
+            <summary>
+            Renders a whole PCB document (board) as a photorealistic 2D SVG (a fab-house / gerber-viewer look)
+            rather than the Altium-editor view. Configure the solder-mask, copper, silkscreen, finish and
+            substrate colours via <paramref name="style"/>; null uses the default green-mask / ENIG / white
+            preset. The supersample knob is ignored for vector output.
+            </summary>
+            <param name="style">Appearance (colours, viewed side, finish); null uses the default preset.</param>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer.RenderRealisticAsync(OriginalCircuit.Altium.Models.Pcb.PcbDocument,System.String,OriginalCircuit.Eda.Rendering.RenderOptions,OriginalCircuit.Altium.Rendering.PcbRealisticStyle,System.Threading.CancellationToken)">
+            <summary>Renders a whole PCB document (board) as a photorealistic 2D SVG to a file.</summary>
+            <param name="style">Appearance (colours, viewed side, finish); null uses the default preset.</param>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer.RenderAsync(OriginalCircuit.Altium.Models.Sch.SchDocument,System.IO.Stream,OriginalCircuit.Eda.Rendering.RenderOptions,System.Threading.CancellationToken)">
+            <summary>Renders a whole schematic document (sheet) to SVG.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer.RenderAsync(OriginalCircuit.Eda.Models.IComponent,System.String,OriginalCircuit.Eda.Rendering.RenderOptions,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer.RenderAsync(OriginalCircuit.Altium.Models.Pcb.PcbDocument,System.String,OriginalCircuit.Eda.Rendering.RenderOptions,OriginalCircuit.Altium.Rendering.PcbRenderSettings,System.Threading.CancellationToken)">
+            <summary>Renders a whole PCB document (board) to an SVG file.</summary>
+            <param name="settings">Optional view-side and layer-visibility settings; null renders a top view with every layer.</param>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.Svg.SvgRenderer.RenderAsync(OriginalCircuit.Altium.Models.Sch.SchDocument,System.String,OriginalCircuit.Eda.Rendering.RenderOptions,System.Threading.CancellationToken)">
+            <summary>Renders a whole schematic document (sheet) to an SVG file.</summary>
+        </member>
+    </members>
+</doc>

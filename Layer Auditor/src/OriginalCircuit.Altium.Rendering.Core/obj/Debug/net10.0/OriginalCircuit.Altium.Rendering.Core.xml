@@ -1,0 +1,875 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>OriginalCircuit.Altium.Rendering.Core</name>
+    </assembly>
+    <members>
+        <member name="T:OriginalCircuit.Altium.Rendering.AltiumStrokeFont">
+            <summary>
+            Lays out text using Altium's built-in stroke (vector) fonts, ported from altium_monkey's
+            <c>StrokeTextRenderer</c>. Produces line segments in a normalized coordinate space where the
+            text height is 1.0, the baseline is at y=0, and glyphs grow in +x (right) and +y (up).
+            Callers scale by the desired height and map into screen space.
+            </summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.AltiumStrokeFont.Style">
+            <summary>Altium stroke font styles (PCB TEXT <c>stroke_font_type</c>: 1=Default, 2=Sans, 3=Serif).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.AltiumStrokeFont.Style.Default">
+            <summary>Default Altium stroke font.</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.AltiumStrokeFont.Style.SansSerif">
+            <summary>Sans-serif stroke font.</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.AltiumStrokeFont.Style.Serif">
+            <summary>Serif stroke font.</summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.AltiumStrokeFont.Segment">
+            <summary>A single stroke segment in normalized units (height = 1.0, baseline y=0, +y up).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.AltiumStrokeFont.Segment.#ctor(System.Single,System.Single,System.Single,System.Single)">
+            <summary>A single stroke segment in normalized units (height = 1.0, baseline y=0, +y up).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.AltiumStrokeFont.FromStrokeFont(OriginalCircuit.Altium.Models.Pcb.PcbStrokeFont)">
+            <summary>Maps a <see cref="T:OriginalCircuit.Altium.Models.Pcb.PcbStrokeFont"/> to the corresponding stroke style.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.AltiumStrokeFont.Layout(System.String,OriginalCircuit.Altium.Rendering.AltiumStrokeFont.Style,System.Single@)">
+            <summary>
+            Lays out <paramref name="text"/> into normalized stroke segments. <paramref name="advanceWidth"/>
+            receives the widest line's total advance (normalized units), for justification/measurement.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.AltiumStrokeFont.MeasureWidth(System.String,OriginalCircuit.Altium.Rendering.AltiumStrokeFont.Style)">
+            <summary>Total advance width (normalized units) of the widest line, without producing geometry.</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.AltiumStrokeFontData.DefaultGlyphs">
+            <summary>Glyph strokes for the Default stroke font (stroke_font_type 1).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.AltiumStrokeFontData.SansSerifGlyphs">
+            <summary>Glyph strokes for the Sans Serif stroke font (stroke_font_type 2).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.AltiumStrokeFontData.SerifGlyphs">
+            <summary>Glyph strokes for the Serif stroke font (stroke_font_type 3).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.AltiumStrokeFontData.DefaultWidths">
+            <summary>Per-character ink widths for the Default stroke font.</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.AltiumStrokeFontData.DefaultAdvances">
+            <summary>Per-character cursor advances for the Default stroke font.</summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.PcbBarcodeGeometry">
+             <summary>
+             Turns a PCB <see cref="T:OriginalCircuit.Altium.Models.Pcb.PcbText"/> that is a 2-D barcode (Data Matrix or QR Code) into world-space geometry
+             the renderers can draw. Altium stores only the barcode's source text — never the module pattern — so the
+             symbol is (re-)encoded on demand (<see cref="T:OriginalCircuit.Altium.Barcodes.DataMatrixEncoder"/> / <see cref="T:OriginalCircuit.Altium.Barcodes.QrCodeEncoder"/>) and laid
+             out at the text's location/size.
+             </summary>
+             <remarks>
+             Sizing follows Altium's barcode "Size Mode": the square symbol fits inside a box whose side comes from the
+             text-box width/height fields (where Altium stores a 2-D barcode's full size — e.g. 7.5&#160;mm on the Coherent
+             Digitiser), inset on all sides by the X/Y margin (the quiet zone). The box's bottom-left corner is anchored
+             at <see cref="P:OriginalCircuit.Altium.Models.Pcb.PcbText.Location"/> and extends right (+X) / up (+Y) before the text rotation and mirror are
+             applied — matching the copper backing fill that shares that origin.
+            
+             The renderable region depends on <see cref="P:OriginalCircuit.Altium.Models.Pcb.PcbText.BarCodeInverted"/>:
+             <list type="bullet">
+             <item>Not inverted: the foreground is the dark data modules (dark-on-light).</item>
+             <item>Inverted: the foreground is the whole box <em>minus</em> the dark modules — the quiet-zone frame plus
+             the light modules — so the symbol reads light-on-dark. On the solder-mask layer that foreground is a mask
+             opening revealing the copper/finish (a gold field with the data modules left masked / green).</item>
+             </list>
+            
+             QR Code symbols use error-correction level M (Altium's fixed level) and the standard penalty-based data
+             mask, which reproduces Altium's symbol.
+             </remarks>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.PcbBarcodeGeometry.Layout">
+            <summary>The laid-out geometry of a 2-D barcode in world coordinates.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbBarcodeGeometry.Layout.Foreground">
+            <summary>The quads to render as the barcode's foreground (dark modules, or — when inverted — the
+            field around the dark modules). On the solder-mask layer these are mask openings.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbBarcodeGeometry.Layout.Inverted">
+            <summary>Whether the symbol is inverted (foreground is the field, modules are the holes).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbBarcodeGeometry.TryBuild(OriginalCircuit.Altium.Models.Pcb.PcbText)">
+            <summary>
+            Builds the world-space geometry for a 2-D barcode text, or returns null if <paramref name="text"/> is not
+            a renderable Data Matrix or QR Code barcode.
+            </summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.ColorHelper">
+            <summary>
+            Converts Altium packed BGR color integers to standard ARGB format.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.ColorHelper.EdaColorToArgb(OriginalCircuit.Eda.Primitives.EdaColor)">
+            <summary>
+            Converts an EdaColor (R, G, B, A) to ARGB uint (0xAARRGGBB).
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.ColorHelper.IsNonZero(OriginalCircuit.Eda.Primitives.EdaColor)">
+            <summary>
+            Returns true if the EdaColor is non-zero (not default black).
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.ColorHelper.BgrToArgb(System.Int32)">
+            <summary>
+            Converts Altium BGR color (0x00BBGGRR) to ARGB (0xFFRRGGBB).
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.ColorHelper.FromRgb(System.Byte,System.Byte,System.Byte)">
+            <summary>
+            Creates a fully opaque ARGB color from individual red, green, and blue components.
+            </summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.ColorHelper.Black">
+            <summary>Black (0xFF000000).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.ColorHelper.White">
+            <summary>White (0xFFFFFFFF).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.ColorHelper.Red">
+            <summary>Red (0xFFFF0000).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.ColorHelper.Green">
+            <summary>Green (0xFF00FF00).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.ColorHelper.Blue">
+            <summary>Blue (0xFF0000FF).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.ColorHelper.Yellow">
+            <summary>Yellow (0xFFFFFF00).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.ColorHelper.DarkGreen">
+            <summary>Dark green (0xFF006400).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.ColorHelper.DarkBlue">
+            <summary>Dark blue (0xFF00008B).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.ColorHelper.Navy">
+            <summary>Navy (0xFF000080).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.ColorHelper.Gray">
+            <summary>Gray (0xFF808080).</summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.CoordTransformExtensions">
+            <summary>
+            Altium-specific extension methods for <see cref="T:OriginalCircuit.Eda.Rendering.CoordTransform"/>.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.CoordTransformExtensions.MapLineWidthEnum(OriginalCircuit.Eda.Rendering.CoordTransform,System.Int32)">
+            <summary>
+            Maps the Altium schematic line-width index (0=Small, 1=Medium, 2=Large, 3=extra) to a
+            screen pixel width. The widths are real world widths in mils (per altium_monkey:
+            Small=1, Medium=3, Large=5) scaled by the current zoom, with a 1px floor so thin lines
+            stay visible when zoomed out — matching Altium's minimum on-screen line width.
+            </summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.IPrimitiveVisitor`1">
+            <summary>
+            Visitor pattern for rendering primitives.
+            </summary>
+            <typeparam name="TContext">The rendering context type (e.g., Graphics, SVG builder).</typeparam>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.IPrimitiveVisitor`1.Visit(OriginalCircuit.Eda.Models.IPrimitive,`0)">
+            <summary>
+            Visits and renders a primitive to the context.
+            </summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.ISchPrimitiveVisitor`1">
+            <summary>
+            Visitor for schematic primitives.
+            </summary>
+            <typeparam name="TContext">The rendering context type.</typeparam>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.IPcbPrimitiveVisitor`1">
+            <summary>
+            Visitor for PCB primitives.
+            </summary>
+            <typeparam name="TContext">The rendering context type.</typeparam>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.LayerColors">
+            <summary>
+            Default color mapping for PCB layers, matching Altium's default layer colors.
+            Layer IDs: 1=Top, 2-31=Mid1-30, 32=Bottom, 33=TopOverlay, 34=BottomOverlay,
+            35=TopPaste, 36=BottomPaste, 37=TopSolder, 38=BottomSolder, 39-54=InternalPlane1-16,
+            55=DrillGuide, 56=KeepOut, 57-72=Mechanical1-16, 73=DrillDrawing, 74=MultiLayer,
+            81=PadHole, 82=ViaHole.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.LayerColors.GetColor(System.Int32)">
+            <summary>
+            Gets the default ARGB color for a PCB layer.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.LayerColors.GetDrawPriority(System.Int32)">
+            <summary>
+            Gets the draw priority for a PCB layer (lower = drawn first / below).
+            Draw priorities match V1's LayerMetadata ordering.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.LayerColors.GetName(System.Int32)">
+            <summary>
+            Gets Altium's human-readable name for a PCB layer (e.g. "Top Layer", "Mechanical 13"),
+            matching the labels shown in Altium's Layers &amp; Colors panel.
+            </summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.OverlineHelper">
+            <summary>
+            Parses Altium's overline escape sequences in pin names and text.
+            A backslash (\) overlines the character that immediately precedes it, so an
+            active-low name like LDAC is stored as "L\D\A\C\" with every letter overlined.
+            </summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.OverlineHelper.TextSegment">
+            <summary>
+            Represents a segment of text with an overline flag.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.OverlineHelper.TextSegment.#ctor(System.String,System.Boolean)">
+            <summary>
+            Represents a segment of text with an overline flag.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.OverlineHelper.Parse(System.String)">
+            <summary>
+            Parses a string containing backslash overline markers into segments. A character is
+            overlined when it is immediately followed by a backslash; the backslashes are markers
+            and are not displayed. Runs of equal overline state are grouped into one segment.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.OverlineHelper.GetDisplayText(System.String)">
+            <summary>
+            Returns the display text (backslashes removed) from a string with overline markers.
+            </summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.PcbViewSide">
+            <summary>Which side of the board a PCB view represents, controlling layer visibility.</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.PcbViewSide.Top">
+            <summary>Top view: bottom-side copper/overlay/paste/solder are hidden.</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.PcbViewSide.Bottom">
+            <summary>Bottom view: top-side copper/overlay/paste/solder are hidden.</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.PcbViewSide.Both">
+            <summary>Show every layer (Altium's see-through 2D editor view).</summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.PcbComponentRenderer">
+            <summary>
+            Renders PCB component primitives to an <see cref="T:OriginalCircuit.Eda.Rendering.IRenderContext"/>.
+            Uses interface properties only — no concrete type casts.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbComponentRenderer.ViewSide">
+            <summary>
+            Which board side this view represents. Defaults to <see cref="F:OriginalCircuit.Altium.Rendering.PcbViewSide.Top"/> so a board
+            renders as a clean top view (bottom-side silk/copper/paste/solder hidden) rather than overlaying
+            both sides' text. Set to <see cref="F:OriginalCircuit.Altium.Rendering.PcbViewSide.Both"/> to show every layer.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbComponentRenderer.LayerFilter">
+            <summary>
+            Optional per-layer visibility predicate. When set, a layer is drawn only if this returns
+            <c>true</c> (in addition to view-side culling). Null draws every non-culled layer.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbComponentRenderer.ClipToBoardOutline">
+            <summary>
+            Trim everything outside the physical board outline. When set, document primitives (and the panel
+            placement outlines) are clipped to the board-outline polygon so overhanging silk/copper/text
+            outside the manufactured board area is removed. Only applies to the whole-document render and only
+            when the document has a Board6 outline. Default <see langword="false"/>.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbComponentRenderer.#ctor(OriginalCircuit.Eda.Rendering.CoordTransform)">
+            <summary>
+            Initializes a new instance of <see cref="T:OriginalCircuit.Altium.Rendering.PcbComponentRenderer"/> with the specified coordinate transform.
+            </summary>
+            <param name="transform">The coordinate transform used to map world coordinates to screen coordinates.</param>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbComponentRenderer.Render(OriginalCircuit.Altium.Models.Pcb.PcbComponent,OriginalCircuit.Eda.Rendering.IRenderContext)">
+            <summary>
+            Renders all primitives of a PCB component to the specified context, sorted by layer draw priority.
+            </summary>
+            <param name="component">The PCB component to render.</param>
+            <param name="context">The render context to draw into.</param>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbComponentRenderer.RenderGroupedByLayer(OriginalCircuit.Altium.Models.Pcb.PcbComponent,OriginalCircuit.Eda.Rendering.IRenderContext)">
+            <summary>
+            Renders all primitives of a PCB component, same as <see cref="M:OriginalCircuit.Altium.Rendering.PcbComponentRenderer.Render(OriginalCircuit.Altium.Models.Pcb.PcbComponent,OriginalCircuit.Eda.Rendering.IRenderContext)"/>,
+            except each layer's primitives are wrapped in a named group via <see cref="M:OriginalCircuit.Eda.Rendering.IRenderContext.BeginGroup(System.String)"/>
+            (id <c>"layer-{layerId}"</c>). A vector backend (SVG) emits an addressable <c>&lt;g id="layer-33"&gt;</c>
+            per layer, so a front-end can toggle individual layers on/off after export with no server round-trip.
+            </summary>
+            <param name="component">The PCB component to render.</param>
+            <param name="context">The render context to draw into.</param>
+            <returns>The distinct layer IDs that were drawn, in the order their groups were emitted.</returns>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbComponentRenderer.Render(OriginalCircuit.Altium.Models.Pcb.PcbDocument,OriginalCircuit.Eda.Rendering.IRenderContext)">
+            <summary>
+            Renders a whole PCB document (board): its top-level primitives plus every component's
+            primitives, all sorted by layer draw priority so the stack-up matches Altium.
+            </summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.PcbLayerGroups">
+            <summary>
+            Classifies Altium PCB layer IDs into groups, for layer-visibility filtering.
+            Layer IDs: 1=Top, 2-31=Mid1-30, 32=Bottom, 33=TopOverlay, 34=BottomOverlay,
+            35=TopPaste, 36=BottomPaste, 37=TopSolder, 38=BottomSolder, 39-54=InternalPlane1-16,
+            55=DrillGuide, 56=KeepOut, 57-72=Mechanical1-16, 73=DrillDrawing, 74=MultiLayer,
+            81=PadHole, 82=ViaHole, 83-98=Mechanical17-32 (an extended range this reader mints for
+            primitives whose legacy single-byte layer field can't represent past Mechanical16).
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsTopCopper(System.Int32)">
+            <summary>Top signal/copper layer (1).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsBottomCopper(System.Int32)">
+            <summary>Bottom signal/copper layer (32).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsMidCopper(System.Int32)">
+            <summary>Internal mid-signal copper layers (2-31).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsCopper(System.Int32)">
+            <summary>Any signal/copper layer, top, bottom or mid (1-32).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsInternalPlane(System.Int32)">
+            <summary>Internal power/ground plane layers (39-54).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsOverlay(System.Int32)">
+            <summary>Silkscreen overlay layers, top (33) or bottom (34).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsPaste(System.Int32)">
+            <summary>Solder-paste stencil layers, top (35) or bottom (36).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsSolderMask(System.Int32)">
+            <summary>Solder-mask layers, top (37) or bottom (38).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsMechanical(System.Int32)">
+            <summary>Mechanical layers, both the original 16 (57-72) and the extended 17-32 range (83-98).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsMultiLayer(System.Int32)">
+            <summary>Multi-layer spanning objects: through-hole pads/vias and their holes (74, 81, 82).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsKeepout(System.Int32)">
+            <summary>The keep-out layer (56).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbLayerGroups.IsSignalOrSilk(System.Int32)">
+            <summary>
+            Electrically meaningful layers plus silkscreen — copper, internal planes, overlay and
+            multi-layer objects — i.e. everything except mechanical, paste, drill and keep-out. Handy
+            for a "show the routing" view that drops fabrication/documentation clutter.
+            </summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.PcbRealisticRenderer">
+            <summary>
+            Renders a <see cref="T:OriginalCircuit.Altium.Models.Pcb.PcbDocument"/> to an <see cref="T:OriginalCircuit.Eda.Rendering.IRenderContext"/> as a photorealistic 2D board
+            (a fab-house / gerber-viewer look), as opposed to the Altium-editor view produced by
+            <see cref="T:OriginalCircuit.Altium.Rendering.PcbComponentRenderer"/>. It composites by physical stack — substrate, copper, a translucent
+            inverse solder mask, surface finish on exposed copper, silkscreen, then drilled holes — so a single
+            top or bottom side reads like a real manufactured board. Colours come from a <see cref="T:OriginalCircuit.Altium.Rendering.PcbRealisticStyle"/>.
+            </summary>
+            <remarks>
+            PCB-only: there is no footprint (<c>PcbComponent</c>) or schematic path. Works against any
+            <see cref="T:OriginalCircuit.Eda.Rendering.IRenderContext"/> backend (so the same engine drives both PNG/JPEG and SVG output).
+            <para>
+            The solder mask is synthesized: Altium stores no mask polarity, so the mask sheet is the board outline
+            minus an <em>opening</em> grown from each non-tented pad/via copper shape. Mask openings whose expansion
+            is rule-driven use <see cref="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.DefaultSolderMaskExpansion"/> (per-object manual
+            expansion is honoured exactly); resolving the actual Altium design rule is a deliberate v1 simplification.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbRealisticRenderer.#ctor(OriginalCircuit.Eda.Rendering.CoordTransform,OriginalCircuit.Altium.Rendering.PcbRealisticStyle,System.UInt32)">
+            <summary>
+            Creates a renderer that maps world coordinates with <paramref name="transform"/> and paints with
+            <paramref name="style"/>. <paramref name="backgroundArgb"/> is the page background, painted into
+            milled cut-outs (mechanical "RouteToolPath" geometry) so they read as removed board.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbRealisticRenderer.FitOutput(OriginalCircuit.Eda.Primitives.CoordRect,System.Int32,System.Int32,System.Boolean)">
+            <summary>
+            Computes the output image size and AutoZoom margin for a board render. When
+            <paramref name="cropToBounds"/> is set and the board bounds are non-degenerate, the size is the
+            board's aspect ratio fitted within the requested width/height and the margin is 1.0, so the rendered
+            board fills the image with no surrounding letterbox (the image is the board's bounding box).
+            Otherwise the requested size and the default 5% fit margin are returned.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbRealisticRenderer.EffectiveSolderMaskExpansion(System.Int32,OriginalCircuit.Eda.Primitives.Coord,OriginalCircuit.Eda.Primitives.Coord)">
+            <summary>
+            Resolves the solder-mask opening expansion for a pad/via copper shape from its expansion mode:
+            <c>0</c> = none (opening == copper), <c>2</c> = the object's manual expansion, anything else
+            (the Altium default <c>1</c> = From-Rule) = <paramref name="defaultExpansion"/>.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbRealisticRenderer.Render(OriginalCircuit.Altium.Models.Pcb.PcbDocument,OriginalCircuit.Eda.Rendering.IRenderContext)">
+            <summary>Renders the board into <paramref name="context"/> using the configured style.</summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.SurfaceFinish">
+            <summary>
+            The board's surface finish — the plating applied to exposed copper (mask openings). Drives the
+            default <see cref="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.FinishColor"/> for the bare-pad look in a photorealistic render.
+            </summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.SurfaceFinish.Hasl">
+            <summary>Hot Air Solder Levelling — a dull silver/tin finish.</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.SurfaceFinish.Enig">
+            <summary>Electroless Nickel Immersion Gold — a flat gold finish (the JLC/​OSH-Park default look).</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.SurfaceFinish.Osp">
+            <summary>Organic Solderability Preservative — leaves bare copper a coppery tone.</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.SurfaceFinish.ImmersionSilver">
+            <summary>Immersion Silver — a bright, slightly grey silver.</summary>
+        </member>
+        <member name="F:OriginalCircuit.Altium.Rendering.SurfaceFinish.ImmersionTin">
+            <summary>Immersion Tin — a pale matte silver.</summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.PcbRealisticStyle">
+            <summary>
+            Configurable appearance for a photorealistic 2D PCB render (a fab-house / gerber-viewer look),
+            as opposed to the Altium-editor colours of <see cref="T:OriginalCircuit.Altium.Rendering.PcbRenderSettings"/>. Controls the substrate,
+            copper, solder-mask, silkscreen and surface-finish colours, plus the viewed side and a few toggles.
+            </summary>
+            <remarks>
+            <para>
+            The solder mask is rendered as a translucent sheet (its <see cref="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.SolderMaskColor"/> carries an
+            alpha channel) painted over the substrate and copper, so mask over copper comes out slightly darker
+            than mask over bare laminate automatically — no separate "mask over copper" colour is needed.
+            </para>
+            <para>
+            Static factory properties provide common presets (e.g. <see cref="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.GreenEnig"/>); each returns a fresh,
+            freely-mutable instance. Pass an instance to <c>RenderRealisticAsync</c> on the raster or SVG renderer.
+            </para>
+            </remarks>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.ViewSide">
+            <summary>
+            Which physical side of the board to render. <see cref="F:OriginalCircuit.Altium.Rendering.PcbViewSide.Bottom"/> mirrors the board
+            horizontally (a true flipped view) and uses the bottom copper/overlay/mask. <see cref="F:OriginalCircuit.Altium.Rendering.PcbViewSide.Both"/>
+            is treated as <see cref="F:OriginalCircuit.Altium.Rendering.PcbViewSide.Top"/> (a 2D photorealistic view shows one side at a time).
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.SubstrateColor">
+            <summary>Bare laminate (FR-4) colour shown where there is no copper and no mask — a light beige.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.CopperColor">
+            <summary>Bare copper colour, seen (tinted) through the translucent solder mask. A coppery brown.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.SolderMaskColor">
+            <summary>
+            Solder-mask colour <em>including its alpha channel</em> (the mask is translucent). The alpha sets how
+            strongly the mask tints the copper/substrate beneath; the default green is ~84% opaque.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.SilkscreenColor">
+            <summary>Silkscreen (overlay) ink colour. Usually white.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.Finish">
+            <summary>The surface finish, which selects the default <see cref="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.FinishColor"/> in the presets.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.FinishColor">
+            <summary>Colour of exposed, plated copper inside mask openings (pads/vias). Defaults to ENIG gold.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.HoleColor">
+            <summary>Colour of drilled holes (pad/via barrels), painted last. A near-black.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.ShowSolderMask">
+            <summary>Draw the solder mask sheet. When false the bare copper and substrate are shown.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.ShowSilkscreen">
+            <summary>Draw silkscreen (overlay tracks/arcs/fills/regions and text).</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.ShowSurfaceFinish">
+            <summary>Paint the surface-finish colour on copper exposed by mask openings (pads/vias).</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.ShowDrillHoles">
+            <summary>Punch drilled holes (pad/via barrels) through the stack in <see cref="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.HoleColor"/>.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.ClipToBoardOutline">
+            <summary>
+            Trim everything outside the physical board outline. When set, the whole composited stack —
+            substrate, copper, solder mask, silkscreen and drills — is clipped to the board-outline polygon,
+            so silk/copper/text overhanging the board edge is removed and the image shows only the
+            manufactured board area. Requires a Board6 outline; a board with none is left unclipped.
+            Independent of <see cref="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.CropToBoardBounds"/> (which only frames the image to the board's
+            bounding box). Default <see langword="false"/>.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.DefaultSolderMaskExpansion">
+            <summary>
+            Solder-mask opening expansion applied to a pad/via copper shape when the object's expansion is
+            rule-driven (<c>SolderMaskExpansionMode == 1</c>) and no matching design rule is found. A small
+            positive value (a few mils) leaves the realistic ring of bare laminate around each opening.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.Supersample">
+            <summary>
+            Anti-aliasing supersample factor (1–4): the raster renderer draws at this multiple of the output
+            size and downsamples, for smoother silk/copper edges. Ignored by the SVG renderer. Higher is
+            sharper but costs N² more memory and time.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.CropToBoardBounds">
+            <summary>
+            Crop the output to the board's bounding box. When set (the default), the output image takes the
+            board's aspect ratio fitted within the requested <c>RenderOptions.Width</c>/<c>Height</c> and the
+            board fills it, so there is no surrounding margin/letterbox — the image <em>is</em> the board's
+            bounding box. When clear, the requested width/height are used verbatim with a small fit margin.
+            Only applies when <c>RenderOptions.AutoZoom</c> is enabled.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.DefaultFinishColor(OriginalCircuit.Altium.Rendering.SurfaceFinish)">
+            <summary>
+            The default plating colour for a given surface finish. These are kept a touch muted/darker than the
+            bare-laminate substrate so that, with the whole copper layer drawn in this colour, mask-over-copper
+            composites slightly darker than mask-over-laminate (the "copper under mask is darker" effect).
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.For(OriginalCircuit.Altium.Rendering.PcbViewSide)">
+            <summary>Returns a copy of this style configured for the given board side.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.GreenEnig">
+            <summary>Green solder mask, ENIG (gold) finish, white silkscreen — the default fab look.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.GreenHasl">
+            <summary>Green solder mask, HASL (silver) finish, white silkscreen.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.BlackEnig">
+            <summary>Matte black solder mask, ENIG (gold) finish, white silkscreen.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.BlueHasl">
+            <summary>Blue solder mask, HASL (silver) finish, white silkscreen.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.RedHasl">
+            <summary>Red solder mask, HASL (silver) finish, white silkscreen.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.WhiteEnig">
+            <summary>White solder mask, ENIG (gold) finish, black silkscreen.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRealisticStyle.PurpleEnig">
+            <summary>Purple solder mask (OSH Park style), ENIG (gold) finish, white silkscreen.</summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.PcbRenderSettings">
+            <summary>
+            Options controlling how a PCB board is rendered: which side it is viewed from and which
+            layers are drawn. Pass to the PCB <c>RenderAsync</c> overloads; when omitted, a plain top view
+            with every layer is used.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.ViewSide">
+            <summary>
+            Which side the board is viewed from. <see cref="F:OriginalCircuit.Altium.Rendering.PcbViewSide.Bottom"/> mirrors the board
+            horizontally (a true flipped view) and hides top-side copper/silk/paste/solder.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.LayerFilter">
+            <summary>
+            When set, a layer is drawn only if this predicate returns <c>true</c>. Takes precedence over
+            the <see cref="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.ShowMechanical"/>/<see cref="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.ShowInternalCopper"/> toggles below. Compose with
+            <see cref="T:OriginalCircuit.Altium.Rendering.PcbLayerGroups"/>, e.g. <c>l =&gt; !PcbLayerGroups.IsMechanical(l)</c>.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.ShowMechanical">
+            <summary>Draw mechanical layers (57-72). Ignored when <see cref="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.LayerFilter"/> is set.</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.ShowInternalCopper">
+            <summary>
+            Draw internal copper: mid-signal layers (2-31) and power/ground planes (39-54). Ignored when
+            <see cref="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.LayerFilter"/> is set.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.ClipToBoardOutline">
+            <summary>
+            Trim everything outside the physical board outline. When set, primitives that overhang the board
+            edge — silkscreen text, notes, copper, etc. — are clipped to the board-outline polygon, so the
+            render shows only what falls within the manufactured board area. Requires a Board6 outline
+            (<see cref="M:OriginalCircuit.Altium.Models.Pcb.PcbDocument.GetBoardOutline"/>); a document with no
+            outline is left unclipped. Default <see langword="false"/>.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.PcbRenderSettings.IsLayerAllowed(System.Int32)">
+            <summary>
+            Resolves whether a layer should be drawn, applying <see cref="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.LayerFilter"/> when present,
+            otherwise the convenience toggles. View-side culling is handled separately by the renderer.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.Top">
+            <summary>A plain top view showing every layer (the default).</summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.PcbRenderSettings.Bottom">
+            <summary>A flipped bottom view showing every (bottom-relevant) layer.</summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.SchComponentRenderer">
+            <summary>
+            Renders schematic component primitives to an IRenderContext.
+            Uses interface properties only — no concrete type casts.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.SchComponentRenderer.DocumentFileName">
+            <summary>
+            File name of the document being rendered (e.g. <c>DAC.SchDoc</c>). Used to resolve the
+            <c>=DocumentName</c> title-block special string. Optional.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.SchComponentRenderer.DocumentFullPath">
+            <summary>
+            Full path of the document being rendered. Used to resolve the
+            <c>=DocumentFullPathAndName</c> title-block special string. Optional.
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.SchComponentRenderer.Fonts">
+            <summary>
+            Font table from the schematic document header. When set, FontId-based
+            lookups will use the correct font name, size, and style.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.SetFonts(System.Collections.Generic.IReadOnlyList{OriginalCircuit.Altium.Models.Sch.SchFontDefinition})">
+            <summary>
+            Populates <see cref="P:OriginalCircuit.Altium.Rendering.SchComponentRenderer.Fonts"/> from a component's parsed font table so text is drawn with the
+            correct family, point size and style instead of the Arial-10 fallback.
+            </summary>
+            <param name="fonts">Font definitions from the schematic header (1-based FontId order).</param>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.SchComponentRenderer.SystemFontId">
+            <summary>
+            The document's system (default) font as a 1-based index into <see cref="P:OriginalCircuit.Altium.Rendering.SchComponentRenderer.Fonts"/>. Text objects
+            that carry no FontId (pins, sheet entries) resolve to this rather than the first table entry.
+            0 means "use the first entry" (the per-component/library fallback).
+            </summary>
+        </member>
+        <member name="P:OriginalCircuit.Altium.Rendering.SchComponentRenderer.PartFilter">
+            <summary>
+            When set, only primitives belonging to this part ID will be rendered.
+            Use 0 or null to render all parts.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.#ctor(OriginalCircuit.Eda.Rendering.CoordTransform)">
+            <summary>
+            Initializes a new instance of <see cref="T:OriginalCircuit.Altium.Rendering.SchComponentRenderer"/> with the specified coordinate transform.
+            </summary>
+            <param name="transform">The coordinate transform used to map world coordinates to screen coordinates.</param>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.Render(OriginalCircuit.Altium.Models.Sch.SchComponent,OriginalCircuit.Eda.Rendering.IRenderContext)">
+            <summary>
+            Renders all visible primitives of a schematic component to the specified context.
+            </summary>
+            <param name="component">The schematic component to render.</param>
+            <param name="context">The render context to draw into.</param>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderPin(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchPin)">
+            <summary>
+            Renders a schematic pin, including its line, electrical type symbol, name, and designator.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderLine(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchLine)">
+            <summary>
+            Renders a schematic line primitive with its color, width, and dash style.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderRectangle(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchRectangle)">
+            <summary>
+            Renders a schematic rectangle with optional fill and border.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderArc(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchArc)">
+            <summary>
+            Renders a schematic arc or full circle based on start and end angles.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderWire(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchWire)">
+            <summary>
+            Renders a schematic wire as a polyline through its vertices.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderPolyline(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchPolyline)">
+            <summary>
+            Renders a schematic polyline with optional start and end line shapes (arrows, circles, etc.).
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderPolygon(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchPolygon)">
+            <summary>
+            Renders a schematic polygon with optional fill and border.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderBezier(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchBezier)">
+            <summary>
+            Renders a schematic bezier curve from its cubic control points.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderEllipse(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchEllipse)">
+            <summary>
+            Renders a schematic ellipse with optional fill and border.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderRoundedRectangle(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchRoundedRectangle)">
+            <summary>
+            Renders a schematic rounded rectangle with optional fill, border, and corner radii.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderPie(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchPie)">
+            <summary>
+            Renders a schematic pie (arc sector) with optional fill and border.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderEllipticalArc(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchEllipticalArc)">
+            <summary>
+            Renders a schematic elliptical arc with independent primary and secondary radii.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.EllipsePolarPoint(System.Double,System.Double,System.Double,System.Double,System.Double)">
+            <summary>
+            Computes a point on Altium's polar-form ellipse: r(θ) = sqrt(1/((cosθ/rx)² + (sinθ/ry)²)),
+            point = (cx + r·cosθ, cy − r·sinθ). The angle is the true geometric direction in degrees
+            (world CCW); screen Y is inverted so the sine term is negated.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderTextFrame(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchTextFrame)">
+            <summary>
+            Renders a schematic text frame with optional fill, border, word wrap, and clipping.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderLabel(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchLabel)">
+            <summary>
+            Renders a schematic label with font, color, rotation, and mirroring support.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderParameter(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchParameter)">
+            <summary>
+            Renders a schematic parameter as text, resolving string indirection and applying rotation.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderJunction(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchJunction)">
+            <summary>
+            Renders a schematic junction as a filled circle at the connection point.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderNetLabel(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchNetLabel)">
+            <summary>
+            Renders a schematic net label as text with font, alignment, and rotation.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderPowerObject(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchPowerObject)">
+            <summary>
+            Renders a schematic power object with its power port symbol and optional net name text.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.Render(OriginalCircuit.Altium.Models.Sch.SchDocument,OriginalCircuit.Eda.Rendering.IRenderContext)">
+            <summary>
+            Renders a whole schematic document (sheet): its top-level primitives plus every placed
+            component instance, in Altium's back-to-front order.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderTemplateGraphics(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchDocument)">
+            <summary>
+            Renders the graphics embedded in the applied sheet template(s): the frame lines, title-block grid,
+            caption/field labels and logo the <c>.SchDot</c> carries as primitives owned by the template record
+            (type 39). They are held on <see cref="P:OriginalCircuit.Altium.Models.Sch.SchTemplate.OwnedPrimitives"/> — kept out of the document's
+            own content collections so they aren't treated as schematic content — and are drawn here behind the
+            content, using the same primitive renderers (so <c>=Title</c>-style field labels still resolve).
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.BuildDocumentParameters(OriginalCircuit.Altium.Models.Sch.SchDocument)">
+            <summary>Builds a case-insensitive Name→Value map from the document's top-level parameters.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderSheetFrame(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchDocument)">
+            <summary>Draws the sheet border, reference zones and title-block grid behind the content.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderSheetBorder(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchSheetInfo,System.Double,System.Double,System.UInt32,System.Double,System.Boolean)">
+            <summary>
+            Draws the alphanumeric reference zones (1,2,3… along top/bottom; A,B,C… along left/right) in the
+            border band — for every template, since Altium computes them. The outer + inner frame rectangles
+            are drawn only for the built-in/standard frame; custom templates embed their own.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderTitleBlock(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchDocument,System.Double,System.UInt32,System.Double)">
+            <summary>
+            Draws the standard Altium title-block grid (the layout from the A-series templates) flush in
+            the inner-frame's bottom-right corner. The grid matches the embedded template labels; for the
+            built-in title block (no embedded labels) the captions and resolved values are drawn too.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.HasEmbeddedTitleBlock(OriginalCircuit.Altium.Models.Sch.SchDocument)">
+            <summary>
+            True when the sheet already carries its own title block, so the built-in one must not be drawn.
+            That happens when an applied sheet template embeds its own graphics (its title-block grid, captions,
+            field labels and logo live on <see cref="P:OriginalCircuit.Altium.Models.Sch.SchTemplate.OwnedPrimitives"/>), or when the document
+            itself carries title-block special-string labels (e.g. <c>=Title</c>).
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderBus(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchBus)">
+            <summary>Renders a schematic bus as a thick polyline.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderBusEntry(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchBusEntry)">
+            <summary>Renders a schematic bus entry (the diagonal stub joining a wire to a bus).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderNoErc(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchNoErc)">
+            <summary>Renders a No-ERC marker as an X cross at the connection point.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderPort(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchPort)">
+            <summary>Renders a sheet port as a flag/hexagon outline with its net name.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderSheetSymbol(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchSheetSymbol)">
+            <summary>Renders a hierarchical sheet symbol (box + names) and its sheet entries.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.DrawSheetSymbolStringFallback(OriginalCircuit.Eda.Rendering.IRenderContext,System.String,System.Double,System.Double,System.UInt32,System.Boolean)">
+            <summary>Auto-places a sheet symbol's name/file string when no positioned label record exists.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderSignalHarness(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchSignalHarness)">
+            <summary>Renders a signal harness (the thick bundle wire connecting a port to a harness connector).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.RenderHarnessConnector(OriginalCircuit.Eda.Rendering.IRenderContext,OriginalCircuit.Altium.Models.Sch.SchHarnessConnector)">
+            <summary>Renders a harness connector: its rounded body, type label, and bundle entries.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.Darken(System.UInt32,System.Double)">
+            <summary>Returns the ARGB colour with its RGB channels scaled by <paramref name="factor"/> (alpha kept).</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.ResolveStringIndirection(System.String)">
+            <summary>
+            Resolves string indirection: if the text starts with "=" it looks up the
+            parameter value from the current component's parameter list.
+            For example, "=Value" resolves to the Value parameter's text.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.TryResolveComputedString(System.String,System.String@)">
+            <summary>
+            Resolves Altium's live special strings (current date/time, document name/path) that Altium
+            computes at render time rather than reading from a parameter. Returns false for other names.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.FixTextEncoding(System.String)">
+            <summary>
+            Repairs UTF-8 parameter values that were decoded as Windows-1252 (Altium stores some text,
+            e.g. "µF", UTF-8-encoded behind a %UTF8% marker the reader doesn't decode, so "µ" arrives as
+            "Âµ"). Re-interprets the Latin-1 bytes as UTF-8 when that yields a valid string.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.IsPartVisible(System.Object)">
+            <summary>
+            Checks whether a primitive should be rendered based on the current PartFilter.
+            Uses dynamic property access since OwnerPartId is not on the IPrimitive interface.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchComponentRenderer.GetOwnerPartId(System.Object)">
+            <summary>
+            Gets the OwnerPartId from a primitive via reflection/pattern matching.
+            Returns 0 (visible in all parts) if the property is not found.
+            </summary>
+        </member>
+        <member name="T:OriginalCircuit.Altium.Rendering.SchFontInfo">
+            <summary>
+            Describes a font entry from a schematic document's font table.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Rendering.SchFontInfo.#ctor(System.String,System.Double,System.Boolean,System.Boolean)">
+            <summary>
+            Describes a font entry from a schematic document's font table.
+            </summary>
+        </member>
+    </members>
+</doc>

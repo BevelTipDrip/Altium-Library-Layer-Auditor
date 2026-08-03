@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/shared/" />
+  <Folder Name="/shared/OriginalCircuit.Eda.Abstractions/" />
+  <Folder Name="/shared/OriginalCircuit.Eda.Abstractions/src/">
+    <Project Path="shared/OriginalCircuit.Eda.Abstractions/src/OriginalCircuit.Eda.Abstractions/OriginalCircuit.Eda.Abstractions.csproj" />
+  </Folder>
+  <Folder Name="/shared/OriginalCircuit.Eda.Rendering/" />
+  <Folder Name="/shared/OriginalCircuit.Eda.Rendering/src/">
+    <Project Path="shared/OriginalCircuit.Eda.Rendering/src/OriginalCircuit.Eda.Rendering.Core/OriginalCircuit.Eda.Rendering.Core.csproj" />
+    <Project Path="shared/OriginalCircuit.Eda.Rendering/src/OriginalCircuit.Eda.Rendering.Svg/OriginalCircuit.Eda.Rendering.Svg.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/OriginalCircuit.Altium.Generators/OriginalCircuit.Altium.Generators.csproj" />
+    <Project Path="src/OriginalCircuit.Altium.Rendering.Core/OriginalCircuit.Altium.Rendering.Core.csproj" />
+    <Project Path="src/OriginalCircuit.Altium.Rendering.Svg/OriginalCircuit.Altium.Rendering.Svg.csproj" />
+    <Project Path="src/OriginalCircuit.Altium/OriginalCircuit.Altium.csproj" />
+  </Folder>
+  <Project Path="PcbLibViewer/PcbLibViewer.csproj" />
+</Solution>

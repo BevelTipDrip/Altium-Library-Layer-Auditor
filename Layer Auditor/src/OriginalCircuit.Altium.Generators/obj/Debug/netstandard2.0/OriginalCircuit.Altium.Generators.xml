@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>OriginalCircuit.Altium.Generators</name>
+    </assembly>
+    <members>
+        <member name="T:OriginalCircuit.Altium.Generators.AltiumRecordGenerator">
+            <summary>
+            Source generator that creates FromParameters() and ToParameters() methods
+            for classes marked with [AltiumRecord].
+            </summary>
+        </member>
+    </members>
+</doc>

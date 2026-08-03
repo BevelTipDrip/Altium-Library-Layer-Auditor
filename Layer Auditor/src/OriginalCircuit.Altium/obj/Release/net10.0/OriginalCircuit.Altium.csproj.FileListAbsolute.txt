@@ -1,0 +1,17 @@
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\bin\Release\net10.0\OriginalCircuit.Altium.deps.json
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\bin\Release\net10.0\OriginalCircuit.Altium.dll
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\bin\Release\net10.0\OriginalCircuit.Altium.pdb
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\bin\Release\net10.0\OriginalCircuit.Altium.xml
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\bin\Release\net10.0\OriginalCircuit.Eda.Abstractions.dll
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\bin\Release\net10.0\OriginalCircuit.Eda.Abstractions.pdb
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\OriginalCircuit.Altium.csproj.AssemblyReference.cache
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\OriginalCircuit.Altium.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\OriginalCircuit.Altium.AssemblyInfoInputs.cache
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\OriginalCircuit.Altium.AssemblyInfo.cs
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\OriginalCircuit.Altium.csproj.CoreCompileInputs.cache
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\Original.0717F2D2.Up2Date
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\OriginalCircuit.Altium.dll
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\refint\OriginalCircuit.Altium.dll
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\OriginalCircuit.Altium.xml
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\OriginalCircuit.Altium.pdb
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\ref\OriginalCircuit.Altium.dll

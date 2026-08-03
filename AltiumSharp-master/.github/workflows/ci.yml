@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore OriginalCircuit.Altium.sln
+
+      - name: Build
+        run: dotnet build OriginalCircuit.Altium.sln --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test tests/OriginalCircuit.Altium.Tests/ --no-build --configuration Release --logger "trx;LogFileName=test-results.trx" --results-directory ./test-results
+
+      - name: Report failed tests
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          ns = {'t': 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
+          for path in glob.glob('test-results/*.trx'):
+              for r in ET.parse(path).getroot().findall('.//t:UnitTestResult', ns):
+                  if r.get('outcome') == 'Failed':
+                      m = r.find('.//t:Message', ns)
+                      msg = ' '.join((m.text or '').split()) if m is not None else ''
+                      print(f"::error::FAILED {r.get('testName')} :: {msg[:300]}")
+          PY
+
+      - name: Run examples (smoke test)
+        run: |
+          dotnet run --project examples/ExtractBom --configuration Release --no-build
+          dotnet run --project examples/GeneratePickAndPlace --configuration Release --no-build
+          dotnet run --project examples/ExtractEmbeddedAssets --configuration Release --no-build
+          dotnet run --project examples/InspectBoard --configuration Release --no-build
+          dotnet run --project examples/NetReport --configuration Release --no-build
+          dotnet run --project examples/SchematicNetlist --configuration Release --no-build
+          dotnet run --project examples/BuildFootprintGenerator --configuration Release --no-build
+          dotnet run --project examples/BuildMultiPartComponent --configuration Release --no-build
+          dotnet run --project examples/WalkHierarchy --configuration Release --no-build
+          dotnet run --project examples/DiffLibraries --configuration Release --no-build
+          dotnet run --project examples/ValidateLibrary --configuration Release --no-build
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: ./test-results/*.trx
+          retention-days: 30

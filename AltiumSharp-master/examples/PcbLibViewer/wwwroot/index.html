@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Altium PcbLib Viewer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%231b6e3c'/%3E%3Ccircle cx='8' cy='8' r='2.4' fill='%23be9042'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%23be9042'/%3E%3Cpath d='M8 8h6a2 2 0 0 1 2 2v4' stroke='%23be9042' stroke-width='1.6' fill='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0d11; --bg2:#0e1217; --panel:#11161d; --panel2:#141a22;
+  --line:#202832; --line2:#2c3742;
+  --ink:#cdd4de; --ink-dim:#7e8896; --ink-faint:#525c68;
+  --copper:#d08a3f; --copper-bright:#f0a857; --copper-deep:#8a5526;
+  --phos:#54d08a; --danger:#e0664f;
+  --r:7px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"JetBrains Mono",ui-monospace,monospace; font-size:13px; line-height:1.4;
+  overflow:hidden;
+  background-image:
+    radial-gradient(1200px 600px at 78% -10%, rgba(208,138,63,.10), transparent 60%),
+    radial-gradient(900px 700px at -5% 110%, rgba(84,208,138,.06), transparent 55%),
+    linear-gradient(transparent 95%, rgba(255,255,255,.018) 95%),
+    linear-gradient(90deg, transparent 95%, rgba(255,255,255,.018) 95%);
+  background-size:auto,auto,22px 22px,22px 22px;
+}
+body::after{
+  content:""; position:fixed; inset:0; pointer-events:none; opacity:.035; z-index:9999;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.app{display:grid; grid-template-rows:auto 1fr; height:100%}
+
+header{
+  display:flex; align-items:center; gap:18px; padding:0 18px; height:54px;
+  border-bottom:1px solid var(--line); background:linear-gradient(180deg,var(--bg2),var(--bg));
+}
+.brand{display:flex; align-items:baseline; gap:10px; font-family:"Chakra Petch",sans-serif}
+.brand .mark{font-weight:700; font-size:19px; letter-spacing:.06em; color:var(--ink); text-transform:uppercase}
+.brand .mark b{color:var(--copper)}
+.brand .sub{font-size:10.5px; letter-spacing:.32em; color:var(--ink-faint); text-transform:uppercase}
+.spacer{flex:1}
+.stat{display:flex; align-items:center; gap:7px; font-size:11px; color:var(--ink-dim); letter-spacing:.04em}
+.led{width:7px; height:7px; border-radius:50%; background:var(--ink-faint); box-shadow:none; transition:.3s}
+.stat.on .led{background:var(--phos); box-shadow:0 0 8px var(--phos)}
+.stat.busy .led{background:var(--copper-bright); box-shadow:0 0 8px var(--copper); animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.35}}
+
+.body{display:grid; grid-template-columns:320px 1fr; height:100%; min-height:0}
+aside{border-right:1px solid var(--line); background:var(--panel); overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; min-height:0}
+aside::-webkit-scrollbar{width:9px} aside::-webkit-scrollbar-thumb{background:var(--line2); border-radius:9px}
+.sec{border-bottom:1px solid var(--line); padding:15px 16px}
+.sec h2{
+  margin:0 0 12px; font-family:"Chakra Petch",sans-serif; font-weight:600;
+  font-size:10.5px; letter-spacing:.28em; text-transform:uppercase; color:var(--ink-faint);
+  display:flex; align-items:center; gap:8px;
+}
+.sec h2::before{content:""; width:11px; height:1px; background:var(--copper); box-shadow:0 0 6px var(--copper)}
+
+.readout{display:grid; grid-template-columns:1fr 1fr; gap:8px 12px}
+.readout .k{font-size:9.5px; letter-spacing:.18em; color:var(--ink-faint); text-transform:uppercase}
+.readout .v{font-size:13px; color:var(--copper-bright); margin-top:1px; word-break:break-word}
+.readout .wide{grid-column:1/3}
+
+.btns{display:grid; grid-template-columns:1fr 1fr; gap:9px}
+.btn{
+  appearance:none; border:1px solid var(--line2); background:var(--panel2); color:var(--ink);
+  font-family:inherit; font-size:11px; letter-spacing:.12em; text-transform:uppercase; font-weight:500;
+  padding:11px 0; border-radius:var(--r); cursor:pointer; transition:.18s; display:flex; align-items:center; justify-content:center; gap:7px;
+}
+.btn:hover{border-color:var(--copper); color:var(--copper-bright); background:rgba(208,138,63,.06)}
+.btn svg{width:13px;height:13px;opacity:.8}
+.btn[disabled]{opacity:.35; pointer-events:none}
+
+/* footprint search + list */
+.search{position:relative; margin-bottom:10px}
+.search input{
+  width:100%; background:var(--panel2); border:1px solid var(--line2); border-radius:var(--r);
+  color:var(--ink); font-family:inherit; font-size:12px; padding:8px 10px; outline:none;
+}
+.search input:focus{border-color:var(--copper-deep)}
+.fplist{display:flex; flex-direction:column; gap:2px; max-height:340px; overflow-y:auto}
+.fplist::-webkit-scrollbar{width:7px} .fplist::-webkit-scrollbar-thumb{background:var(--line2); border-radius:9px}
+.fp{
+  display:flex; flex-direction:column; gap:1px; padding:7px 9px; border-radius:6px; cursor:pointer;
+  border:1px solid transparent; transition:.15s;
+}
+.fp:hover{background:rgba(255,255,255,.03)}
+.fp.on{background:rgba(208,138,63,.09); border-color:var(--copper-deep)}
+.fp .n{font-size:12px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.fp.on .n{color:var(--copper-bright); font-weight:600}
+.fp .m{font-size:9.5px; color:var(--ink-faint); letter-spacing:.05em}
+.empty-list{font-size:11px; color:var(--ink-faint); padding:8px 2px}
+
+/* layer checkboxes */
+.layer{display:flex; align-items:center; gap:10px; padding:6px 0; cursor:pointer; user-select:none}
+.layer input{appearance:none; width:15px; height:15px; border-radius:4px; border:1px solid var(--line2); background:var(--panel2); flex:none; position:relative; cursor:pointer; transition:.15s}
+.layer input:checked{background:var(--copper-deep); border-color:var(--copper)}
+.layer input:checked::after{content:""; position:absolute; left:4px; top:1px; width:4px; height:8px; border:solid #1a120a; border-width:0 2px 2px 0; transform:rotate(45deg)}
+.layer .name{flex:1; font-size:11.5px; letter-spacing:.03em; color:var(--ink-dim)}
+.layer input:checked ~ .name{color:var(--ink)}
+.layer .dot{width:8px;height:8px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.4)}
+.layer-toolbar{display:flex; gap:8px; margin-bottom:10px}
+.layer-toolbar button{
+  appearance:none; border:1px solid var(--line2); background:var(--panel2); color:var(--ink-dim);
+  font-family:inherit; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; padding:5px 9px;
+  border-radius:5px; cursor:pointer;
+}
+.layer-toolbar button:hover{color:var(--copper-bright); border-color:var(--copper-deep)}
+#noLayers{font-size:11px; color:var(--ink-faint)}
+
+.stage{position:relative; min-width:0; overflow:hidden;
+  background:
+    radial-gradient(80% 80% at 50% 40%, rgba(255,255,255,.025), transparent 70%),
+    repeating-linear-gradient(0deg, transparent 0 31px, rgba(255,255,255,.012) 31px 32px),
+    repeating-linear-gradient(90deg, transparent 0 31px, rgba(255,255,255,.012) 31px 32px),
+    var(--bg);
+}
+#pan{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; cursor:grab; touch-action:none}
+#pan.drag{cursor:grabbing}
+#pan svg{display:block; filter:drop-shadow(0 24px 60px rgba(0,0,0,.6)); max-width:none}
+.stage.empty #pan{display:none}
+
+.drop{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; text-align:center; padding:30px}
+.stage:not(.empty) .drop{display:none}
+.drop .ring{width:120px; height:120px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:1px dashed var(--line2); position:relative; transition:.25s}
+.drop .ring svg{width:42px; height:42px; stroke:var(--copper); opacity:.85}
+.drop .ring::before{content:""; position:absolute; inset:-9px; border-radius:50%; border:1px solid var(--line); opacity:.5}
+.drop h3{margin:0; font-family:"Chakra Petch",sans-serif; font-weight:600; font-size:16px; letter-spacing:.06em; color:var(--ink)}
+.drop p{margin:0; font-size:11.5px; color:var(--ink-faint); letter-spacing:.08em; max-width:300px}
+.drop .pick{color:var(--copper-bright); text-decoration:underline; cursor:pointer}
+body.dragging .stage{outline:1px dashed var(--copper); outline-offset:-6px}
+body.dragging .drop .ring{border-color:var(--copper); box-shadow:0 0 40px rgba(208,138,63,.2); transform:scale(1.04)}
+
+.hud{position:absolute; left:14px; bottom:12px; display:flex; gap:10px; align-items:center; font-size:10px; color:var(--ink-faint); letter-spacing:.12em; text-transform:uppercase; pointer-events:none}
+.hud .pill{border:1px solid var(--line); background:rgba(10,13,17,.7); padding:4px 9px; border-radius:5px; backdrop-filter:blur(4px)}
+.zoombar{position:absolute; right:14px; bottom:12px; display:flex; gap:6px}
+.zoombar button{width:30px; height:30px; border:1px solid var(--line); background:rgba(10,13,17,.7); color:var(--ink-dim); border-radius:6px; cursor:pointer; font-size:15px; backdrop-filter:blur(4px); transition:.15s}
+.zoombar button:hover{color:var(--copper-bright); border-color:var(--copper-deep)}
+.toast{position:absolute; top:14px; left:50%; transform:translateX(-50%) translateY(-16px); opacity:0; transition:.25s;
+  background:var(--panel2); border:1px solid var(--danger); color:#f3b6a9; padding:9px 16px; border-radius:7px; font-size:11.5px; letter-spacing:.04em; pointer-events:none}
+.toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+.scan{position:absolute; inset:0; pointer-events:none; opacity:0; transition:.2s}
+.stage.busy .scan{opacity:1; background:linear-gradient(90deg,transparent,rgba(208,138,63,.07),transparent); background-size:40% 100%; animation:scan 1.1s linear infinite}
+@keyframes scan{from{background-position:-40% 0}to{background-position:140% 0}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <span class="mark">Altium<b>·</b>PcbLib<b>·</b>Viewer</span>
+      <span class="sub">footprint&nbsp;layer&nbsp;inspector</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="stat" id="status"><span class="led"></span><span id="statusText">no library loaded</span></div>
+  </header>
+
+  <div class="body">
+    <aside>
+      <div class="sec">
+        <h2>Library</h2>
+        <div class="btns" style="grid-template-columns:1fr">
+          <button class="btn" id="loadBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>
+            Load .PcbLib
+          </button>
+        </div>
+        <div class="search" style="margin-top:13px">
+          <input type="text" id="fpSearch" placeholder="Filter footprints…" disabled>
+        </div>
+        <div class="fplist" id="fplist"><div class="empty-list">No library loaded yet.</div></div>
+      </div>
+
+      <div class="sec">
+        <h2>Footprint</h2>
+        <div class="readout" id="readout">
+          <div class="wide"><div class="k">Name</div><div class="v" id="r-name">—</div></div>
+          <div><div class="k">Size</div><div class="v" id="r-size">—</div></div>
+          <div><div class="k">Pads</div><div class="v" id="r-pads">—</div></div>
+          <div class="wide" id="r-descRow" style="display:none"><div class="k">Description</div><div class="v" id="r-desc">—</div></div>
+        </div>
+      </div>
+
+      <div class="sec" style="flex:1">
+        <h2>Layers</h2>
+        <div class="layer-toolbar">
+          <button id="allOn">All on</button>
+          <button id="allOff">All off</button>
+        </div>
+        <div id="layers"><div id="noLayers">Select a footprint to see its layers.</div></div>
+      </div>
+
+      <div class="sec">
+        <h2>Export</h2>
+        <div class="btns">
+          <button class="btn" id="svgBtn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3v5h5M14 3H6v18h12V8z"/></svg> SVG
+          </button>
+          <button class="btn" id="pngBtn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15l-5-5L5 21M3 5h18v14H3z"/></svg> PNG
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="stage empty" id="stage">
+      <div id="pan"></div>
+      <div class="scan"></div>
+      <div class="drop">
+        <div class="ring">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="16" cy="16" r="1.4" fill="currentColor"/><path d="M8 8h6a2 2 0 0 1 2 2v4"/></svg>
+        </div>
+        <h3>Drop a footprint library here</h3>
+        <p>Drag &amp; drop a <b>.PcbLib</b> file, or <span class="pick" id="pickLink">browse</span>. It's parsed right here — no upload to anywhere but this local service.</p>
+      </div>
+      <div class="hud"><span class="pill" id="hudZoom">100%</span><span class="pill">drag&nbsp;to&nbsp;pan&nbsp;·&nbsp;scroll&nbsp;to&nbsp;zoom</span></div>
+      <div class="zoombar"><button id="zOut">−</button><button id="zFit">⊡</button><button id="zIn">+</button></div>
+      <div class="toast" id="toast"></div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file" accept=".PcbLib" hidden>
+
+<script>
+const state = {
+  id:null, name:null,
+  footprints:[], filtered:[], selected:-1,
+  layers:{},           // layerId(number) -> bool visible, for the currently rendered footprint
+  view:{scale:1, x:0, y:0}, fit:1,
+};
+
+const $ = s => document.querySelector(s);
+const stage=$('#stage'), pan=$('#pan'), status=$('#status'), statusText=$('#statusText');
+
+// ── Wiring ───────────────────────────────────────────
+$('#loadBtn').onclick = $('#pickLink').onclick = ()=>$('#file').click();
+$('#file').addEventListener('change', e=>{ if(e.target.files[0]) upload(e.target.files[0]); });
+$('#svgBtn').onclick = exportSvg;
+$('#pngBtn').onclick = exportPng;
+$('#fpSearch').addEventListener('input', e=>{ renderFpList(e.target.value); });
+$('#allOn').onclick = ()=>setAllLayers(true);
+$('#allOff').onclick = ()=>setAllLayers(false);
+
+['dragenter','dragover'].forEach(ev=>window.addEventListener(ev, e=>{e.preventDefault(); document.body.classList.add('dragging');}));
+['dragleave','drop'].forEach(ev=>window.addEventListener(ev, e=>{e.preventDefault(); if(ev!=='dragleave'||e.clientX<=0) document.body.classList.remove('dragging');}));
+window.addEventListener('drop', e=>{
+  document.body.classList.remove('dragging');
+  const f=[...e.dataTransfer.files].find(f=>/\.pcblib$/i.test(f.name)) || e.dataTransfer.files[0];
+  if(f) upload(f);
+});
+
+// ── Upload ───────────────────────────────────────────
+async function upload(file){
+  if(!/\.pcblib$/i.test(file.name)){ toast('That doesn’t look like a .PcbLib file'); return; }
+  setStatus('busy','reading '+file.name);
+  try{
+    const fd=new FormData(); fd.append('file', file);
+    const res=await fetch('/api/upload',{method:'POST', body:fd});
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.error||'upload failed');
+    state.id=data.id; state.name=data.name; state.footprints=data.footprints; state.selected=-1;
+    $('#fpSearch').disabled=false; $('#fpSearch').value='';
+    renderFpList('');
+    setStatus('on', `${data.name} · ${data.count} footprint(s)`);
+    if(data.footprints.length) selectFootprint(0);
+  }catch(err){ setStatus('','no library loaded'); toast(err.message); }
+}
+
+function renderFpList(filter){
+  const q=(filter||'').trim().toLowerCase();
+  state.filtered = q ? state.footprints.filter(f=>f.name.toLowerCase().includes(q)) : state.footprints;
+  const list=$('#fplist');
+  if(!state.filtered.length){ list.innerHTML=`<div class="empty-list">${state.footprints.length? 'No match.' : 'No library loaded yet.'}</div>`; return; }
+  list.innerHTML = state.filtered.map(f=>`
+    <div class="fp${f.index===state.selected?' on':''}" data-index="${f.index}">
+      <span class="n">${escapeHtml(f.name)}</span>
+      <span class="m">${f.widthMm} × ${f.heightMm} mm · ${f.pads} pad${f.pads===1?'':'s'}</span>
+    </div>`).join('');
+  list.querySelectorAll('[data-index]').forEach(el=>{
+    el.addEventListener('click', ()=>selectFootprint(+el.dataset.index));
+  });
+}
+
+function selectFootprint(index){
+  state.selected=index;
+  document.querySelectorAll('.fp').forEach(el=>el.classList.toggle('on', +el.dataset.index===index));
+  const fp=state.footprints[index];
+  if(fp){
+    $('#r-name').textContent=fp.name;
+    $('#r-size').textContent=`${fp.widthMm} × ${fp.heightMm} mm`;
+    $('#r-pads').textContent=fp.pads;
+    if(fp.description){ $('#r-descRow').style.display=''; $('#r-desc').textContent=fp.description; }
+    else $('#r-descRow').style.display='none';
+  }
+  $('#svgBtn').disabled=$('#pngBtn').disabled=false;
+  resetView(); render();
+}
+
+// ── Render ───────────────────────────────────────────
+let renderSeq=0;
+async function render(){
+  if(!state.id || state.selected<0) return;
+  const seq=++renderSeq;
+  setStatus('busy','rendering…'); stage.classList.add('busy');
+  try{
+    const res=await fetch('/api/render.svg',{method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:state.id, index:state.selected})});
+    if(seq!==renderSeq) return;
+    if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error||'render failed'); }
+    const data=await res.json();
+    if(seq!==renderSeq) return;
+    pan.innerHTML=data.svg;
+    const svg=pan.querySelector('svg');
+    if(svg){ svg.removeAttribute('width'); svg.removeAttribute('height'); stage.classList.remove('empty'); }
+    buildLayerList(data.layers);
+    fitView(); applyLayers();
+    setStatus('on', `${state.name} · ${state.footprints[state.selected].name}`);
+  }catch(err){ toast(err.message); setStatus('on', state.name||''); }
+  finally{ stage.classList.remove('busy'); }
+}
+
+function buildLayerList(layers){
+  state.layers={};
+  layers.forEach(l=>{ state.layers[l.id]=true; });
+  const box=$('#layers');
+  if(!layers.length){ box.innerHTML='<div id="noLayers">This footprint has no drawable primitives.</div>'; return; }
+  box.innerHTML = layers.map(l=>`
+    <label class="layer" data-layer="${l.id}">
+      <input type="checkbox" checked>
+      <span class="name">${escapeHtml(l.name)}</span>
+      <span class="dot" style="background:${l.color}"></span>
+    </label>`).join('');
+  box.querySelectorAll('[data-layer]').forEach(row=>{
+    row.querySelector('input').addEventListener('change', e=>{
+      state.layers[row.dataset.layer]=e.target.checked;
+      applyLayers();
+    });
+  });
+}
+
+function applyLayers(){
+  const svg=pan.querySelector('svg'); if(!svg) return;
+  for(const id in state.layers){
+    const g=svg.querySelector(`#layer-${id}`);
+    if(g) g.style.display = state.layers[id] ? '' : 'none';
+  }
+}
+
+function setAllLayers(on){
+  for(const id in state.layers) state.layers[id]=on;
+  document.querySelectorAll('#layers input[type=checkbox]').forEach(cb=>cb.checked=on);
+  applyLayers();
+}
+
+// ── Pan / zoom ───────────────────────────────────────
+function svgEl(){ return pan.querySelector('svg'); }
+function fitView(){
+  const svg=svgEl(); if(!svg) return;
+  const vb=svg.viewBox.baseVal;
+  const r=stage.getBoundingClientRect();
+  const pad=48;
+  const s=Math.min((r.width-pad)/vb.width, (r.height-pad)/vb.height);
+  svg.style.width=vb.width+'px'; svg.style.height=vb.height+'px';
+  state.fit=s; state.view={scale:s, x:0, y:0};
+  applyView();
+}
+function applyView(){
+  const svg=svgEl(); if(!svg) return;
+  svg.style.transformOrigin='center';
+  pan.style.transform=`translate(${state.view.x}px,${state.view.y}px) scale(${state.view.scale})`;
+  $('#hudZoom').textContent=Math.round(state.view.scale/state.fit*100)+'%';
+}
+function resetView(){ state.view={scale:1,x:0,y:0}; }
+stage.addEventListener('wheel', e=>{
+  if(!svgEl()) return; e.preventDefault();
+  const f=e.deltaY<0?1.12:1/1.12;
+  const ns=Math.max(state.fit*0.3, Math.min(state.fit*14, state.view.scale*f));
+  const r=stage.getBoundingClientRect(), cx=e.clientX-r.left-r.width/2, cy=e.clientY-r.top-r.height/2;
+  const k=ns/state.view.scale;
+  state.view.x=cx-(cx-state.view.x)*k; state.view.y=cy-(cy-state.view.y)*k; state.view.scale=ns;
+  applyView();
+},{passive:false});
+let drag=null;
+pan.addEventListener('pointerdown', e=>{ drag={x:e.clientX,y:e.clientY,vx:state.view.x,vy:state.view.y}; pan.classList.add('drag'); pan.setPointerCapture(e.pointerId); });
+pan.addEventListener('pointermove', e=>{ if(!drag) return; state.view.x=drag.vx+(e.clientX-drag.x); state.view.y=drag.vy+(e.clientY-drag.y); applyView(); });
+pan.addEventListener('pointerup', ()=>{ drag=null; pan.classList.remove('drag'); });
+$('#zIn').onclick=()=>zoomBy(1.2); $('#zOut').onclick=()=>zoomBy(1/1.2); $('#zFit').onclick=fitView;
+function zoomBy(f){ state.view.scale=Math.max(state.fit*0.3, Math.min(state.fit*14, state.view.scale*f)); applyView(); }
+window.addEventListener('resize', ()=>{ if(svgEl()) fitView(); });
+
+// ── Export ───────────────────────────────────────────
+function liveSvgString(){
+  const svg=svgEl(); if(!svg) return null;
+  const clone=svg.cloneNode(true);
+  clone.removeAttribute('style');
+  const vb=svg.viewBox.baseVal;
+  clone.setAttribute('width', vb.width); clone.setAttribute('height', vb.height);
+  if(!clone.getAttribute('xmlns')) clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+  return '<?xml version="1.0" encoding="UTF-8"?>\n'+clone.outerHTML;
+}
+function download(blob, name){
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+function currentFpName(){ return (state.footprints[state.selected]||{}).name || 'footprint'; }
+function exportSvg(){
+  const s=liveSvgString(); if(!s) return;
+  download(new Blob([s],{type:'image/svg+xml'}), `${currentFpName()}.svg`);
+}
+function exportPng(){
+  const s=liveSvgString(); const svg=svgEl(); if(!s||!svg) return;
+  const vb=svg.viewBox.baseVal, scale=2;
+  const img=new Image();
+  img.onload=()=>{
+    const c=document.createElement('canvas'); c.width=vb.width*scale; c.height=vb.height*scale;
+    const ctx=c.getContext('2d');
+    ctx.fillStyle='#14181f'; ctx.fillRect(0,0,c.width,c.height);
+    ctx.drawImage(img,0,0,c.width,c.height);
+    c.toBlob(b=>download(b, `${currentFpName()}.png`), 'image/png');
+  };
+  img.onerror=()=>toast('PNG export failed');
+  img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(s);
+}
+
+// ── Helpers ──────────────────────────────────────────
+function setStatus(cls, text){ status.className='stat'+(cls?' '+cls:''); statusText.textContent=text; }
+let toastTimer=null;
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'), 3600); }
+function escapeHtml(s){ return (s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body>
+</html>

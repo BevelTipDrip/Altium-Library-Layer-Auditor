@@ -1,0 +1,80 @@
+<Project>
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <!-- Dependency vulnerability auditing: surface advisories and fail the build on any new one.
+       OpenMcdf was upgraded to the 3.x line, which clears the two prior 2.3.0 cyclic directory-entry
+       DoS advisories (GHSA-5qwm-7pvp-w988, GHSA-jxpf-xq2m-q525), so no suppressions are needed. -->
+  <PropertyGroup>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Deterministic and reproducible builds -->
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <!-- CI builds: enable SourceLink reproducibility -->
+  <PropertyGroup Condition="'$(CI)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- Shared NuGet metadata for all publishable packages -->
+  <PropertyGroup Condition="'$(IsPackable)' != 'false' and '$(DevelopmentDependency)' != 'true'">
+    <Version>2.0.0-alpha.1</Version>
+    <Authors>OriginalCircuit</Authors>
+    <Company>OriginalCircuit Limited</Company>
+    <Copyright>Copyright 2020-2026 Original Circuit Limited</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/issus/AltiumSharp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/issus/AltiumSharp</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>altium;schlib;pcblib;altium designer;eda;ecad;pcb</PackageTags>
+    <PackageIcon>icon.png</PackageIcon>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+
+  <!-- SourceLink for GitHub -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false' and '$(DevelopmentDependency)' != 'true'">
+    <None Include="$(MSBuildThisFileDirectory)assets\icon.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!--
+    The publishable packages reference the shared OriginalCircuit.Eda.* projects (and, for the
+    glTF renderer, the OriginalCircuit.Mech.* projects) via ProjectReference with
+    PrivateAssets="all". Those projects are NOT yet published as standalone NuGet packages, so
+    without this they would be emitted as unresolvable package dependencies (NU1101 on restore).
+    Instead we bundle their built assemblies directly into our lib/ folder. Same-version
+    duplicates across our own packages are resolved harmlessly by the consumer.
+  -->
+  <PropertyGroup Condition="'$(IsPackable)' != 'false' and '$(DevelopmentDependency)' != 'true'">
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);_IncludeSharedEdaAssemblies</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
+
+  <Target Name="_IncludeSharedEdaAssemblies" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths)"
+                            Condition="'%(Extension)' == '.dll' and ($([System.String]::Copy('%(Filename)').StartsWith('OriginalCircuit.Eda.')) or $([System.String]::Copy('%(Filename)').StartsWith('OriginalCircuit.Mech.')))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

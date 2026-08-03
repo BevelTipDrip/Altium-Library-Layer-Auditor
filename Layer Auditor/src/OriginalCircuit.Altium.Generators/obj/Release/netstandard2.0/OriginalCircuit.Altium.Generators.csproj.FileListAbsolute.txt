@@ -1,0 +1,12 @@
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\bin\Release\netstandard2.0\OriginalCircuit.Altium.Generators.deps.json
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\bin\Release\netstandard2.0\OriginalCircuit.Altium.Generators.dll
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\bin\Release\netstandard2.0\OriginalCircuit.Altium.Generators.pdb
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\bin\Release\netstandard2.0\OriginalCircuit.Altium.Generators.xml
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Release\netstandard2.0\OriginalCircuit.Altium.Generators.csproj.AssemblyReference.cache
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Release\netstandard2.0\OriginalCircuit.Altium.Generators.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Release\netstandard2.0\OriginalCircuit.Altium.Generators.AssemblyInfoInputs.cache
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Release\netstandard2.0\OriginalCircuit.Altium.Generators.AssemblyInfo.cs
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Release\netstandard2.0\OriginalCircuit.Altium.Generators.csproj.CoreCompileInputs.cache
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Release\netstandard2.0\OriginalCircuit.Altium.Generators.dll
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Release\netstandard2.0\OriginalCircuit.Altium.Generators.xml
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Release\netstandard2.0\OriginalCircuit.Altium.Generators.pdb
