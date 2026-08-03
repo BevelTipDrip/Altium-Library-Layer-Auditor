@@ -15,3 +15,4 @@ C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCir
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\OriginalCircuit.Altium.xml
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\OriginalCircuit.Altium.pdb
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\ref\OriginalCircuit.Altium.dll
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium\obj\Release\net10.0\OriginalCircuit.Altium.sourcelink.json

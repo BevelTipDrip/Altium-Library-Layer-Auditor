@@ -10,3 +10,4 @@ C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCir
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Debug\netstandard2.0\OriginalCircuit.Altium.Generators.dll
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Debug\netstandard2.0\OriginalCircuit.Altium.Generators.xml
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Debug\netstandard2.0\OriginalCircuit.Altium.Generators.pdb
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Generators\obj\Debug\netstandard2.0\OriginalCircuit.Altium.Generators.sourcelink.json

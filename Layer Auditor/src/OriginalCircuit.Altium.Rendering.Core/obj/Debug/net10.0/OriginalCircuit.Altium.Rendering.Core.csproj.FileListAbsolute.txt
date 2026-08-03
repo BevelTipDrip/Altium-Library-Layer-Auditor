@@ -20,3 +20,4 @@ C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCir
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Rendering.Core\obj\Debug\net10.0\OriginalCircuit.Altium.Rendering.Core.xml
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Rendering.Core\obj\Debug\net10.0\OriginalCircuit.Altium.Rendering.Core.pdb
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Rendering.Core\obj\Debug\net10.0\ref\OriginalCircuit.Altium.Rendering.Core.dll
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\src\OriginalCircuit.Altium.Rendering.Core\obj\Debug\net10.0\OriginalCircuit.Altium.Rendering.Core.sourcelink.json

@@ -206,7 +206,14 @@ static int DisplayLayerNumber(int id) => id switch
     _ => id,
 };
 
-static string FormatLayerName(int id, string baseName) => $"{baseName} ({DisplayLayerNumber(id)})";
+// Layers with a single, fixed purpose — there's only ever one "Top Solder" — carry no number in
+// Altium's own UI (unlike Mechanical N, where the number is what actually varies between libraries
+// and is worth calling out). Top/Bottom Layer, Overlay, Paste, Solder, Drill Guide, Keep-Out,
+// Drill Drawing, Multi-Layer, Pad/Via Holes.
+static bool IsUnnumberedLayer(int id) => id is 1 or 32 or 33 or 34 or 35 or 36 or 37 or 38 or 55 or 56 or 73 or 74 or 81 or 82;
+
+static string FormatLayerName(int id, string baseName) =>
+    IsUnnumberedLayer(id) ? baseName : $"{baseName} ({DisplayLayerNumber(id)})";
 
 // Every audited primitive on a component, as (layer, kind). A PcbComponentBody is Altium's actual
 // "3D body" primitive type (see its doc comment); every other primitive kind is a flat 2D "Primitive"

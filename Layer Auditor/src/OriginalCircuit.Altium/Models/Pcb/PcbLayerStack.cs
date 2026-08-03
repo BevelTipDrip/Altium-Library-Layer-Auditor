@@ -98,6 +98,26 @@ public sealed class PcbLayerStack
             entries[i] = entry;
         }
 
+        // Supplementary source: the "LAYER_V8_{Y}NAME" table, a flat sequential index unrelated to the
+        // classic LAYER{N}NAME numbering above, but the only place a custom name for the *extended*
+        // Mechanical 17-32 range (id 83-98 — see PcbLibReader.ResolveMechanicalLayerByte) is recorded;
+        // the classic table has no slots past Mechanical 16. Y=11..26 covers Mechanical 1-16 (id
+        // 57-72, redundant with the classic table) and Y=40..55 covers Mechanical 17-32 (id 83-98, not
+        // present anywhere else). Only fills gaps the classic table left; never overrides it.
+        for (var y = 0; y <= 60; y++)
+        {
+            int? id = y switch
+            {
+                >= 11 and <= 26 => 46 + y, // Mechanical 1-16 -> 57-72
+                >= 40 and <= 55 => 43 + y, // Mechanical 17-32 -> 83-98
+                _ => null,
+            };
+            if (id is null || entries.ContainsKey(id.Value))
+                continue;
+            if (parameters.TryGetValue($"LAYER_V8_{y}NAME", out var v8Name))
+                entries[id.Value] = new PcbLayerEntry { Index = id.Value, Name = v8Name };
+        }
+
         if (entries.Count == 0)
             return null;
 
