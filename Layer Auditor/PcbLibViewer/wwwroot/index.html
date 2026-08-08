@@ -118,10 +118,19 @@ aside.report{border-right:none; border-left:1px solid var(--line)}
 .layer-toolbar button:hover{color:var(--copper-bright); border-color:var(--copper-deep)}
 #noLayers{font-size:11px; color:var(--ink-faint)}
 
-/* illegal-layer badge (per-footprint Layers list) */
+/* illegal-layer badge + reassignment dropdowns (per-footprint Layers list) */
 .illegal-badge{display:none; flex:none; font-size:8.5px; font-weight:700; letter-spacing:.06em; color:#2a0d08; background:var(--danger); border-radius:4px; padding:1.5px 5px; margin-right:2px}
-.layer.illegal .illegal-badge{display:inline-block}
-.layer.illegal .name{color:#e0664f}
+.layer-entry.illegal .illegal-badge{display:inline-block}
+.layer-entry.illegal .layer .name{color:#e0664f}
+.reassign-row{display:none; align-items:center; gap:8px; padding:4px 0 4px 25px}
+.layer-entry.illegal .reassign-row{display:flex}
+.reassign-row .rk{flex:none; width:60px; letter-spacing:.04em; text-transform:uppercase; font-size:9px; color:var(--ink-faint)}
+.reassign-row select{
+  flex:1; min-width:0; background:var(--panel2); border:1px solid var(--line2); border-radius:5px; color:var(--ink);
+  font-family:inherit; font-size:10.5px; padding:4px 6px; outline:none;
+}
+.reassign-row select:focus{border-color:var(--copper-deep)}
+#applyReassignBtn{margin-top:10px; width:100%}
 
 /* legal-layers group labels */
 .group-label{font-size:9px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-faint); margin:10px 0 2px; display:flex; align-items:center; gap:6px}
@@ -199,6 +208,12 @@ body.dragging .drop .ring{border-color:var(--copper); box-shadow:0 0 40px rgba(2
             Load .PcbLib
           </button>
         </div>
+        <div class="btns" style="grid-template-columns:1fr; margin-top:8px">
+          <button class="btn" id="exportLibBtn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            Export Modified Library
+          </button>
+        </div>
         <div class="search" style="margin-top:13px">
           <input type="text" id="fpSearch" placeholder="Filter footprints…" disabled>
         </div>
@@ -235,6 +250,10 @@ body.dragging .drop .ring{border-color:var(--copper); box-shadow:0 0 40px rgba(2
           <button id="allOff">All off</button>
         </div>
         <div id="layers"><div id="noLayers">Select a footprint to see its layers.</div></div>
+        <button class="btn" id="applyReassignBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          Apply Reassignments
+        </button>
       </div>
 
       <div class="sec">
@@ -292,6 +311,7 @@ const state = {
   layers:{},           // layerId(number) -> bool visible, for the currently rendered footprint
   libraryLayers:[],    // every layer used anywhere in the library, from /api/upload
   legal:{},            // layerId(number) -> bool legal, library-wide (the audit checklist)
+  lastLayers:null,     // the `layers` array from the last successful render, for refreshLayerList()
   issuesByName:{},     // footprint name -> total issue count, from the last generated report
   view:{scale:1, x:0, y:0}, fit:1,
 };
@@ -312,6 +332,8 @@ $('#legalAllOff').onclick = ()=>setAllLegal(false);
 $('#genReportBtn').onclick = generateReport;
 $('#copyReportBtn').onclick = copyReport;
 $('#downloadReportBtn').onclick = downloadReport;
+$('#applyReassignBtn').onclick = applyReassignments;
+$('#exportLibBtn').onclick = exportLibrary;
 
 ['dragenter','dragover'].forEach(ev=>window.addEventListener(ev, e=>{e.preventDefault(); document.body.classList.add('dragging');}));
 ['dragleave','drop'].forEach(ev=>window.addEventListener(ev, e=>{e.preventDefault(); if(ev!=='dragleave'||e.clientX<=0) document.body.classList.remove('dragging');}));
@@ -331,8 +353,9 @@ async function upload(file){
     const data=await res.json();
     if(!res.ok) throw new Error(data.error||'upload failed');
     state.id=data.id; state.name=data.name; state.footprints=data.footprints; state.selected=-1;
-    state.libraryLayers=data.libraryLayers; state.issuesByName={};
+    state.libraryLayers=data.libraryLayers; state.issuesByName={}; state.lastLayers=null;
     $('#fpSearch').disabled=false; $('#fpSearch').value='';
+    $('#exportLibBtn').disabled=false;
     renderFpList('');
     buildLegalLayersList();
     resetReportPanel();
@@ -390,6 +413,7 @@ async function render(){
     pan.innerHTML=data.svg;
     const svg=pan.querySelector('svg');
     if(svg){ svg.removeAttribute('width'); svg.removeAttribute('height'); stage.classList.remove('empty'); }
+    state.lastLayers=data.layers;
     buildLayerList(data.layers);
     fitView(); applyLayers();
     setStatus('on', `${state.name} · ${state.footprints[state.selected].name}`);
@@ -402,29 +426,51 @@ function buildLayerList(layers){
   layers.forEach(l=>{ state.layers[l.id]=true; });
   const box=$('#layers');
   if(!layers.length){ box.innerHTML='<div id="noLayers">This footprint has no drawable primitives.</div>'; return; }
-  box.innerHTML = layers.map(l=>`
-    <label class="layer" data-layer="${l.id}">
-      <input type="checkbox" checked>
-      <span class="illegal-badge">ILLEGAL</span>
-      <span class="name">${escapeHtml(l.name)}</span>
-      <span class="dot" style="background:${l.color}"></span>
-    </label>`).join('');
-  box.querySelectorAll('[data-layer]').forEach(row=>{
-    row.querySelector('input').addEventListener('change', e=>{
-      state.layers[row.dataset.layer]=e.target.checked;
+  box.innerHTML = layers.map(l=>{
+    const reassignRows = (l.kinds||[]).map(kind => `
+      <div class="reassign-row" data-layer="${l.id}" data-kind="${escapeHtml(kind)}">
+        <span class="rk">${kind==='3D Body'?'3D Bodies':'Primitives'}</span>
+        <select>
+          <option value="">— target layer —</option>
+          ${legalLayerOptions()}
+        </select>
+      </div>`).join('');
+    return `
+    <div class="layer-entry" data-layer="${l.id}">
+      <label class="layer">
+        <input type="checkbox" checked>
+        <span class="illegal-badge">ILLEGAL</span>
+        <span class="name">${escapeHtml(l.name)}</span>
+        <span class="dot" style="background:${l.color}"></span>
+      </label>
+      ${reassignRows}
+    </div>`;
+  }).join('');
+  box.querySelectorAll('.layer-entry').forEach(entry=>{
+    entry.querySelector('input[type=checkbox]').addEventListener('change', e=>{
+      state.layers[entry.dataset.layer]=e.target.checked;
       applyLayers();
     });
   });
   applyIllegalBadges();
 }
 
-// Flags rows in the per-footprint Layers list whose layer isn't in the library-wide legal set.
-// Called both after a render and whenever the Legal Layers checklist changes.
+// Flags entries in the per-footprint Layers list whose layer isn't in the library-wide legal set —
+// this both shows the ILLEGAL badge and reveals that layer's reassignment dropdown(s) (CSS-gated on
+// the same .illegal class). Called both after a render and whenever the Legal Layers checklist changes.
 function applyIllegalBadges(){
-  document.querySelectorAll('#layers [data-layer]').forEach(row=>{
-    const legal = state.legal[row.dataset.layer];
-    row.classList.toggle('illegal', legal===false);
+  document.querySelectorAll('#layers .layer-entry').forEach(entry=>{
+    const legal = state.legal[entry.dataset.layer];
+    entry.classList.toggle('illegal', legal===false);
   });
+}
+
+// Options for a reassignment target dropdown: every layer currently marked legal.
+function legalLayerOptions(){
+  return state.libraryLayers
+    .filter(l=>state.legal[l.id])
+    .map(l=>`<option value="${l.id}">${escapeHtml(l.name)}</option>`)
+    .join('');
 }
 
 function applyLayers(){
@@ -472,17 +518,26 @@ function buildLegalLayersList(){
   box.querySelectorAll('[data-layer]').forEach(el=>{
     el.querySelector('input').addEventListener('change', e=>{
       state.legal[el.dataset.layer]=e.target.checked;
-      applyIllegalBadges();
+      refreshLayerList();
     });
   });
   $('#genReportBtn').disabled=false;
   applyIllegalBadges();
 }
 
+// Rebuilds the currently-shown footprint's Layers list (badges + reassignment dropdown options)
+// from the last render response, client-side, whenever the Legal Layers set changes — no server
+// round-trip, and no pan/zoom reset the way re-rendering the SVG would cause. Without this, the
+// reassignment dropdowns keep whatever options existed at the last actual render, so a layer marked
+// legal afterward never appears as a target — it stays stuck on the original default-legal set.
+function refreshLayerList(){
+  if(state.lastLayers) buildLayerList(state.lastLayers);
+}
+
 function setAllLegal(on){
   for(const id in state.legal) state.legal[id]=on;
   document.querySelectorAll('#legalLayers input[type=checkbox]').forEach(cb=>cb.checked=on);
-  applyIllegalBadges();
+  refreshLayerList();
 }
 
 // ── Audit report ───────────────────────────────────────
@@ -527,6 +582,50 @@ function copyReport(){
 function downloadReport(){
   const blob=new Blob([$('#reportText').textContent],{type:'text/plain'});
   download(blob, `${state.name||'library'}-audit.txt`);
+}
+
+// ── Reassignment ───────────────────────────────────────
+// Reads every reassignment dropdown that's actually been set, applies them to the CURRENT footprint
+// only (per-footprint scope — the same fix on a different footprint needs setting again there), then
+// re-renders so badges/dropdowns reflect the now-fixed layers. Nothing is written to a file yet —
+// that only happens via Export Modified Library, which can bundle fixes from as many footprints as
+// you've applied them to in this session.
+async function applyReassignments(){
+  if(!state.id || state.selected<0) return;
+  const reassignments=[];
+  document.querySelectorAll('.reassign-row').forEach(row=>{
+    const target=row.querySelector('select').value;
+    if(!target) return;
+    reassignments.push({fromLayer:+row.dataset.layer, kind:row.dataset.kind, toLayer:+target});
+  });
+  if(!reassignments.length){ toast('Pick at least one target layer first'); return; }
+
+  setStatus('busy','reassigning…');
+  try{
+    const res=await fetch('/api/reassign',{method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:state.id, index:state.selected, reassignments})});
+    if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error||'reassign failed'); }
+    const data=await res.json();
+    const layerName=id=>(state.libraryLayers.find(l=>l.id===id)||{}).name || `Layer ${id}`;
+    const detail=data.results.map(r=>`${r.kind} ${layerName(r.fromLayer)}→${layerName(r.toLayer)}: ${r.moved}`).join(' · ');
+    toast(`Moved ${data.moved} item(s) on ${currentFpName()} — ${detail}`);
+    await render();
+  }catch(err){ toast(err.message); }
+  finally{ setStatus('on', state.name||''); }
+}
+
+async function exportLibrary(){
+  if(!state.id) return;
+  setStatus('busy','exporting…');
+  try{
+    const res=await fetch('/api/export',{method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:state.id})});
+    if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error||'export failed'); }
+    const blob=await res.blob();
+    download(blob, `${state.name||'library'}-edited.PcbLib`);
+    toast('Exported modified library');
+  }catch(err){ toast(err.message); }
+  finally{ setStatus('on', state.name||''); }
 }
 
 // ── Pan / zoom ───────────────────────────────────────

@@ -22123,6 +22123,16 @@
             as a length-prefixed C-string block.
             </summary>
         </member>
+        <member name="M:OriginalCircuit.Altium.Serialization.Writers.PcbDocWriter.LayerByteToName(System.Int32)">
+            <summary>
+            Converts a numeric PCB layer id to Altium's canonical internal layer token (e.g. "TOP",
+            "MECHANICAL20", "MULTILAYER") — the string format the file's own V7_LAYER text fields and
+            <see cref="P:OriginalCircuit.Altium.Models.Pcb.PcbComponentBody.LayerName"/> use. Public because callers that construct
+            or reassign a ComponentBody/Region's layer programmatically need it: unlike most primitives,
+            those two read their *name* field, not just the numeric layer, when serialized (see
+            <see cref="M:OriginalCircuit.Altium.Serialization.Writers.PcbLibWriter.WriteComponentBody(OriginalCircuit.Altium.Serialization.Binary.BinaryFormatWriter,OriginalCircuit.Altium.Models.Pcb.PcbComponentBody)"/>), so setting only the numeric layer isn't enough.
+            </summary>
+        </member>
         <member name="T:OriginalCircuit.Altium.Serialization.Writers.PcbLibWriter">
             <summary>
             Writes PCB footprint library (.PcbLib) files.
@@ -22173,6 +22183,20 @@
             against the corpus and altium_monkey's PcbV7LayerPartition):
             0x0100_0000+layer (signal 1-32), 0x0101_0000+(layer-38) (internal plane 39-54),
             0x0102_0000+(layer-56) (mechanical 57-72), 0x0103_0000+partition (special layers).
+            Mechanical layers past 16 (id 1000+N, N=layer-1000 — see PcbLibReader.MechanicalLayerId) extend
+            the same 0x0102_0000 mechanical base with the absolute N, e.g. 0x0102_0000+20 for Mechanical 20;
+            confirmed against this reader's own extraction of the equivalent field from real Altium output
+            and cross-checked live in Altium up to Mechanical 89.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Serialization.Writers.PcbLibWriter.LegacyLayerByte(System.Int32)">
+            <summary>
+            The legacy single-byte layer field written at primitive offset 0. For mechanical layers past 16
+            (id 1000+N) this is inherently lossy — Altium itself clamps it to Mechanical 16 (72) for
+            backward compatibility with readers that predate the extended range, with the true layer
+            recoverable only from <see cref="M:OriginalCircuit.Altium.Serialization.Writers.PcbLibWriter.V7LayerId(System.Int32)"/> (Region/ComponentBody) or the hidden secondary
+            byte (Track/Text/...; see PcbLibReader.ResolveMechanicalLayerByte). Casting straight to byte
+            without this clamp would silently wrap (e.g. layer 1020 -> byte 252), corrupting the file.
             </summary>
         </member>
         <member name="M:OriginalCircuit.Altium.Serialization.Writers.PcbLibWriter.BuildPadExtendedTail(OriginalCircuit.Altium.Models.Pcb.PcbPad)">

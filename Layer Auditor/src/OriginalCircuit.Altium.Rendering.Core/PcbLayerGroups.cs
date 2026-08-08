@@ -5,8 +5,9 @@ namespace OriginalCircuit.Altium.Rendering;
 /// Layer IDs: 1=Top, 2-31=Mid1-30, 32=Bottom, 33=TopOverlay, 34=BottomOverlay,
 /// 35=TopPaste, 36=BottomPaste, 37=TopSolder, 38=BottomSolder, 39-54=InternalPlane1-16,
 /// 55=DrillGuide, 56=KeepOut, 57-72=Mechanical1-16, 73=DrillDrawing, 74=MultiLayer,
-/// 81=PadHole, 82=ViaHole, 83-98=Mechanical17-32 (an extended range this reader mints for
-/// primitives whose legacy single-byte layer field can't represent past Mechanical16).
+/// 81=PadHole, 82=ViaHole, 1000+N=Mechanical N for N&gt;16 (an extended range this reader mints
+/// for primitives whose legacy single-byte layer field can't represent past Mechanical16 — Altium
+/// itself supports far more than 16, confirmed live up to at least Mechanical 89).
 /// </summary>
 public static class PcbLayerGroups
 {
@@ -34,8 +35,8 @@ public static class PcbLayerGroups
     /// <summary>Solder-mask layers, top (37) or bottom (38).</summary>
     public static bool IsSolderMask(int layer) => layer is 37 or 38;
 
-    /// <summary>Mechanical layers, both the original 16 (57-72) and the extended 17-32 range (83-98).</summary>
-    public static bool IsMechanical(int layer) => (layer >= 57 && layer <= 72) || (layer >= 83 && layer <= 98);
+    /// <summary>Mechanical layers, both the original 16 (57-72) and the extended N&gt;16 range (1000+N).</summary>
+    public static bool IsMechanical(int layer) => (layer >= 57 && layer <= 72) || layer >= 1017;
 
     /// <summary>Multi-layer spanning objects: through-hole pads/vias and their holes (74, 81, 82).</summary>
     public static bool IsMultiLayer(int layer) => layer is 74 or 81 or 82;

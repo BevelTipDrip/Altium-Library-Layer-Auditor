@@ -599,7 +599,7 @@ public sealed class PcbLibWriter
     internal static void WriteCommonPrimitiveData(BinaryFormatWriter writer, int layer, ushort flags = 0,
         ushort netIndex = 0xFFFF, int componentIndex = -1, ushort polygonIndex = 0xFFFF)
     {
-        writer.Write((byte)layer);
+        writer.Write(LegacyLayerByte(layer));
         writer.Write(flags);
         writer.Write(netIndex);                                                       // net index (0xFFFF = none)
         writer.Write(polygonIndex);                                                    // polygon index (0xFFFF = none, 0 for regions)
@@ -631,6 +631,10 @@ public sealed class PcbLibWriter
     /// against the corpus and altium_monkey's PcbV7LayerPartition):
     /// 0x0100_0000+layer (signal 1-32), 0x0101_0000+(layer-38) (internal plane 39-54),
     /// 0x0102_0000+(layer-56) (mechanical 57-72), 0x0103_0000+partition (special layers).
+    /// Mechanical layers past 16 (id 1000+N, N=layer-1000 — see PcbLibReader.MechanicalLayerId) extend
+    /// the same 0x0102_0000 mechanical base with the absolute N, e.g. 0x0102_0000+20 for Mechanical 20;
+    /// confirmed against this reader's own extraction of the equivalent field from real Altium output
+    /// and cross-checked live in Altium up to Mechanical 89.
     /// </summary>
     internal static uint V7LayerId(int layer)
     {
@@ -638,6 +642,7 @@ public sealed class PcbLibWriter
         if (layer >= 1 && layer <= 31) return 0x01000000u + (uint)layer;          // signal (top/mid)
         if (layer >= 39 && layer <= 54) return 0x01010000u + (uint)(layer - 38);  // internal plane 1-16
         if (layer >= 57 && layer <= 72) return 0x01020000u + (uint)(layer - 56);  // mechanical 1-16
+        if (layer >= 1017) return 0x01020000u + (uint)(layer - 1000);             // mechanical 17+ (extended)
         return layer switch                                                       // special (0x0103 partition)
         {
             33 => 0x01030006u, // top overlay
@@ -653,6 +658,16 @@ public sealed class PcbLibWriter
             _ => 0x0103000Fu,  // fallback: multi-layer
         };
     }
+
+    /// <summary>
+    /// The legacy single-byte layer field written at primitive offset 0. For mechanical layers past 16
+    /// (id 1000+N) this is inherently lossy — Altium itself clamps it to Mechanical 16 (72) for
+    /// backward compatibility with readers that predate the extended range, with the true layer
+    /// recoverable only from <see cref="V7LayerId"/> (Region/ComponentBody) or the hidden secondary
+    /// byte (Track/Text/...; see PcbLibReader.ResolveMechanicalLayerByte). Casting straight to byte
+    /// without this clamp would silently wrap (e.g. layer 1020 -> byte 252), corrupting the file.
+    /// </summary>
+    internal static byte LegacyLayerByte(int layer) => layer >= 1017 ? (byte)72 : (byte)layer;
 
     internal static void WriteArc(BinaryFormatWriter writer, PcbArc arc)
     {
@@ -1345,8 +1360,16 @@ public sealed class PcbLibWriter
         var name = layerName.ToUpperInvariant().Replace(" ", "").Replace("-", "");
 
         // Check common mechanical layers first (most common for ComponentBody)
-        if (name.StartsWith("MECHANICAL") && int.TryParse(name.AsSpan("MECHANICAL".Length), out var mechNum) && mechNum >= 1 && mechNum <= 16)
-            return (byte)(56 + mechNum); // Mechanical1=57, Mechanical16=72
+        if (name.StartsWith("MECHANICAL") && int.TryParse(name.AsSpan("MECHANICAL".Length), out var mechNum) && mechNum >= 1)
+        {
+            // Mechanical 1-16 map onto the classic byte range directly. Anything past 16 has no room
+            // in a single byte — Altium itself clamps these to Mechanical 16 (72) for backward
+            // compatibility, with the true layer recoverable only from the V7_LAYER text this same
+            // primitive carries (which callers must also set to "MECHANICAL{n}" — see
+            // PcbLibReader.ResolveExtendedMechanicalLayer). Silently returning 0 (NoLayer) here, as
+            // this used to, would corrupt the file for any body/region past Mechanical 16.
+            return mechNum <= 16 ? (byte)(56 + mechNum) : (byte)72; // Mechanical1=57, Mechanical16+=72
+        }
 
         return name switch
         {

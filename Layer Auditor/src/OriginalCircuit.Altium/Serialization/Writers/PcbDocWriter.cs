@@ -1131,7 +1131,15 @@ public sealed class PcbDocWriter
         return (v < 0 ? "-" : " ") + mantissa;
     }
 
-    internal static string LayerByteToName(int layer)
+    /// <summary>
+    /// Converts a numeric PCB layer id to Altium's canonical internal layer token (e.g. "TOP",
+    /// "MECHANICAL20", "MULTILAYER") — the string format the file's own V7_LAYER text fields and
+    /// <see cref="Models.Pcb.PcbComponentBody.LayerName"/> use. Public because callers that construct
+    /// or reassign a ComponentBody/Region's layer programmatically need it: unlike most primitives,
+    /// those two read their *name* field, not just the numeric layer, when serialized (see
+    /// <see cref="PcbLibWriter.WriteComponentBody"/>), so setting only the numeric layer isn't enough.
+    /// </summary>
+    public static string LayerByteToName(int layer)
     {
         return layer switch
         {
@@ -1150,6 +1158,7 @@ public sealed class PcbDocWriter
             _ when layer >= 2 && layer <= 31 => $"MID{layer - 1}",
             _ when layer >= 39 && layer <= 54 => $"INTERNALPLANE{layer - 38}",
             _ when layer >= 57 && layer <= 72 => $"MECHANICAL{layer - 56}",
+            _ when layer >= 1017 => $"MECHANICAL{layer - 1000}", // extended range, N>16 — see PcbLibReader.MechanicalLayerId
             _ => layer.ToString(CultureInfo.InvariantCulture)
         };
     }

@@ -98,24 +98,36 @@ public sealed class PcbLayerStack
             entries[i] = entry;
         }
 
-        // Supplementary source: the "LAYER_V8_{Y}NAME" table, a flat sequential index unrelated to the
-        // classic LAYER{N}NAME numbering above, but the only place a custom name for the *extended*
-        // Mechanical 17-32 range (id 83-98 — see PcbLibReader.ResolveMechanicalLayerByte) is recorded;
-        // the classic table has no slots past Mechanical 16. Y=11..26 covers Mechanical 1-16 (id
-        // 57-72, redundant with the classic table) and Y=40..55 covers Mechanical 17-32 (id 83-98, not
-        // present anywhere else). Only fills gaps the classic table left; never overrides it.
-        for (var y = 0; y <= 60; y++)
+        // Supplementary source: the "LAYER_V8_{Y}" table — the only place a custom name for a
+        // Mechanical layer past 16 (id 1000+N — see PcbLibReader.MechanicalLayerId) is recorded; the
+        // classic table above has no slots past Mechanical 16.
+        //
+        // Y is NOT a fixed schema position: it's specific to each file's own layer configuration and
+        // does not generalize across files (confirmed empirically — the same Y means a different layer
+        // in different files). Instead, each mechanical V8 slot carries its own "LAYERID" scripting
+        // identifier whose LOW BYTE reliably equals the mechanical number regardless of file or Y
+        // position (e.g. LAYERID=16908308 → 16908308 & 0xFF = 20 = Mechanical 20), confirmed against
+        // two independently-verified files including a live cross-check against Altium's own UI.
+        // "MECHENABLED" presence on a slot marks it as mechanical — non-mechanical V8 slots (copper,
+        // overlay, ...) also have a LAYERID, but its low byte means nothing for our purposes and must
+        // not be used. Only fills gaps the classic table left; never overrides it.
+        for (var y = 0; y <= 200; y++)
         {
-            int? id = y switch
-            {
-                >= 11 and <= 26 => 46 + y, // Mechanical 1-16 -> 57-72
-                >= 40 and <= 55 => 43 + y, // Mechanical 17-32 -> 83-98
-                _ => null,
-            };
-            if (id is null || entries.ContainsKey(id.Value))
+            if (!parameters.ContainsKey($"LAYER_V8_{y}MECHENABLED"))
                 continue;
-            if (parameters.TryGetValue($"LAYER_V8_{y}NAME", out var v8Name))
-                entries[id.Value] = new PcbLayerEntry { Index = id.Value, Name = v8Name };
+            if (!parameters.TryGetValue($"LAYER_V8_{y}NAME", out var v8Name))
+                continue;
+            if (!parameters.TryGetValue($"LAYER_V8_{y}LAYERID", out var layerIdStr) ||
+                !long.TryParse(layerIdStr, out var layerIdRaw))
+                continue;
+
+            var mechNum = (int)(layerIdRaw & 0xFF);
+            if (mechNum < 1)
+                continue;
+            var id = mechNum <= 16 ? 56 + mechNum : 1000 + mechNum; // matches PcbLibReader.MechanicalLayerId
+
+            if (!entries.ContainsKey(id))
+                entries[id] = new PcbLayerEntry { Index = id, Name = v8Name };
         }
 
         if (entries.Count == 0)

@@ -107,12 +107,6 @@ public static class LayerColors
         // Special layers
         [81] = 0xFF009190, // Pad Holes (BGR 0x909100)
         [82] = 0xFF816200, // Via Holes (BGR 0x006281)
-
-        // Mechanical 17-32 (extended range): repeats the Mechanical 1-16 colour cycle above.
-        [83] = 0xFFFF00FF, [84] = 0xFF800080, [85] = 0xFF008000, [86] = 0xFF808000,
-        [87] = 0xFFFF00FF, [88] = 0xFF800080, [89] = 0xFF008000, [90] = 0xFF808000,
-        [91] = 0xFFFF00FF, [92] = 0xFF800080, [93] = 0xFF008000, [94] = 0xFF808000,
-        [95] = 0xFFFF00FF, [96] = 0xFF800080, [97] = 0xFF008000, [98] = 0xFF000000,
     };
 
     /// <summary>
@@ -120,6 +114,13 @@ public static class LayerColors
     /// </summary>
     public static uint GetColor(int layerId)
     {
+        // Mechanical N>16 (extended range, id 1000+N): no fixed slot, so repeat the Mechanical 1-16
+        // colour cycle above rather than falling through to plain gray.
+        if (layerId >= 1017)
+        {
+            var cyclic = 57 + ((layerId - 1000 - 1) % 16);
+            return DefaultColors.TryGetValue(cyclic, out var cyclicColor) ? cyclicColor : 0xFF808080;
+        }
         return DefaultColors.TryGetValue(layerId, out var color) ? color : 0xFF808080;
     }
 
@@ -145,7 +146,7 @@ public static class LayerColors
             35 => 8,                                       // Top Paste
             33 => 9,                                       // Top Overlay (silk) — above copper
             _ when layerId >= 57 && layerId <= 72 => 10,  // Mechanical 1-16
-            _ when layerId >= 83 && layerId <= 98 => 10,  // Mechanical 17-32 (extended range)
+            _ when layerId >= 1017 => 10,                  // Mechanical N>16 (extended range)
             56 => 11,                                      // Keep-Out
             55 => 12,                                      // Drill Guide
             73 => 12,                                      // Drill Drawing
@@ -179,7 +180,7 @@ public static class LayerColors
         74 => "Multi-Layer",
         81 => "Pad Holes",
         82 => "Via Holes",
-        >= 83 and <= 98 => $"Mechanical {layerId - 66}",
+        >= 1017 => $"Mechanical {layerId - 1000}",
         _ => $"Layer {layerId}",
     };
 }

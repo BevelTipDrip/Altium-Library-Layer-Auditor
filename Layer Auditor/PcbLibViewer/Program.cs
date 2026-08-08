@@ -25,6 +25,7 @@ using OriginalCircuit.Altium;
 using OriginalCircuit.Altium.Models.Pcb;
 using OriginalCircuit.Altium.Rendering;
 using OriginalCircuit.Altium.Rendering.Svg;
+using OriginalCircuit.Altium.Serialization.Writers;
 using OriginalCircuit.Eda.Primitives;
 using OriginalCircuit.Eda.Rendering;
 
@@ -45,6 +46,7 @@ app.MapPost("/api/upload", async (IFormFile file, LibraryCache cache, Cancellati
 {
     if (file.Length == 0) return Results.BadRequest(new { error = "Empty file." });
 
+    PcbLibrary library;
     List<PcbComponent> components;
     Dictionary<int, string> layerNames;
     try
@@ -53,14 +55,15 @@ app.MapPost("/api/upload", async (IFormFile file, LibraryCache cache, Cancellati
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, ct);
         buffer.Position = 0;
-        var library = await AltiumLibrary.OpenPcbLibAsync(buffer, ct);
+        var opened = await AltiumLibrary.OpenPcbLibAsync(buffer, ct);
+        library = (PcbLibrary)opened;
         components = library.AllComponents.Cast<PcbComponent>().ToList();
 
         // Layer numbering is fixed (1=Top, 32=Bottom, 57-72=Mechanical, ...), but the DISPLAY name for
         // a given number is per-file: Altium lets a user rename e.g. layer 69 to "Top Assembly" or "Top
         // Courtyard", and that only lives in this library's own layer-stack header — so it must be read
         // fresh from each upload, never assumed from a fixed table.
-        layerNames = (library as PcbLibrary)?.LayerStack?.Layers
+        layerNames = library.LayerStack?.Layers
             .ToDictionary(l => l.Index, l => l.Name) ?? new Dictionary<int, string>();
     }
     catch (Exception ex)
@@ -68,7 +71,7 @@ app.MapPost("/api/upload", async (IFormFile file, LibraryCache cache, Cancellati
         return Results.BadRequest(new { error = $"Could not read '{file.FileName}': {ex.Message}" });
     }
 
-    var id = cache.Add(components, layerNames);
+    var id = cache.Add(library, components, layerNames, Path.GetFileNameWithoutExtension(file.FileName));
     var footprints = components.Select((c, i) => new
     {
         index = i,
@@ -111,7 +114,7 @@ app.MapPost("/api/render.svg", async (RenderRequest req, LibraryCache cache, Can
 {
     var entry = cache.Get(req.Id);
     if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
-    var (components, layerNames) = entry.Value;
+    var (_, components, layerNames, _) = entry.Value;
     if (req.Index < 0 || req.Index >= components.Count)
         return Results.BadRequest(new { error = "Footprint index out of range." });
 
@@ -127,11 +130,19 @@ app.MapPost("/api/render.svg", async (RenderRequest req, LibraryCache cache, Can
     var layerIds = await svg.RenderGroupedByLayerAsync(component, ms, options, cancellationToken: ct);
     var svgText = Encoding.UTF8.GetString(ms.ToArray());
 
+    // Which kinds (Primitive / 3D Body) this footprint actually has on each layer — lets the
+    // reassignment UI show one dropdown for a layer with only one kind, or two when a 3D body and a
+    // flat primitive share the same (illegal) layer, exactly the case that needs different fixes.
+    var kindsByLayer = AuditEntries(component)
+        .GroupBy(e => e.Layer)
+        .ToDictionary(g => g.Key, g => g.Select(e => e.Kind).Distinct().ToList());
+
     var layers = layerIds.Select(id => new
     {
         id,
         name = FormatLayerName(id, layerNames.TryGetValue(id, out var customName) ? customName : LayerColors.GetName(id)),
         color = ToHex(LayerColors.GetColor(id)),
+        kinds = kindsByLayer.TryGetValue(id, out var k) ? k : new List<string>(),
     });
 
     return Results.Json(new { svg = svgText, layers });
@@ -142,7 +153,7 @@ app.MapPost("/api/report", (ReportRequest req, LibraryCache cache) =>
 {
     var entry = cache.Get(req.Id);
     if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
-    var (components, layerNames) = entry.Value;
+    var (_, components, layerNames, _) = entry.Value;
     var legal = new HashSet<int>(req.LegalLayers ?? new List<int>());
 
     string NameOf(int id) => FormatLayerName(id, layerNames.TryGetValue(id, out var n) ? n : LayerColors.GetName(id));
@@ -186,23 +197,119 @@ app.MapPost("/api/report", (ReportRequest req, LibraryCache cache) =>
     });
 });
 
+// ── Reassign: move a footprint's flagged primitives/3D bodies from one layer to another ──────
+// Mutates the cached in-memory model directly (no file write yet — see /api/export). Scoped to a
+// single footprint per the chosen workflow: each footprint's fixes are independent, so the same
+// mistake on a different footprint needs its own reassignment even if it's the same source/target.
+app.MapPost("/api/reassign", (ReassignRequest req, LibraryCache cache) =>
+{
+    var entry = cache.Get(req.Id);
+    if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
+    var (_, components, _, _) = entry.Value;
+    if (req.Index < 0 || req.Index >= components.Count)
+        return Results.BadRequest(new { error = "Footprint index out of range." });
+
+    var component = components[req.Index];
+    var results = req.Reassignments.Select(rule => new
+    {
+        rule.FromLayer,
+        rule.Kind,
+        rule.ToLayer,
+        moved = rule.FromLayer == rule.ToLayer ? 0 : ReassignLayer(component, rule.FromLayer, rule.Kind, rule.ToLayer),
+    }).ToList();
+
+    return Results.Json(new { moved = results.Sum(r => r.moved), results });
+});
+
+// ── Export: serialize the current (possibly reassigned) in-memory library back to a .PcbLib ──────
+app.MapPost("/api/export", async (ExportRequest req, LibraryCache cache, CancellationToken ct) =>
+{
+    var entry = cache.Get(req.Id);
+    if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
+    var (library, _, _, name) = entry.Value;
+
+    using var ms = new MemoryStream();
+    await library.SaveAsync(ms, null, ct);
+    return Results.File(ms.ToArray(), "application/octet-stream", $"{name}-edited.PcbLib");
+});
+
 app.Run();
+
+// Moves every primitive/3D body of the given kind currently on fromLayer to toLayer, on one
+// component. ComponentBody and Region are special: unlike every other primitive, the writer reads
+// their *name* field (not the numeric layer) when serializing (see PcbLibWriter.WriteComponentBody),
+// so LayerByteToName must be kept in sync alongside the numeric layer or the file would round-trip
+// back to the OLD layer despite the in-memory model showing the new one.
+static int ReassignLayer(PcbComponent c, int fromLayer, string kind, int toLayer)
+{
+    var count = 0;
+    var layerName = PcbDocWriter.LayerByteToName(toLayer);
+
+    if (kind == "3D Body")
+    {
+        foreach (var b in c.ComponentBodies.Cast<PcbComponentBody>())
+        {
+            if (b.Layer != fromLayer) continue;
+            b.Layer = toLayer;
+            b.LayerName = layerName;
+            count++;
+        }
+        return count;
+    }
+
+    foreach (var t in c.Tracks.Cast<PcbTrack>()) if (t.Layer == fromLayer) { t.Layer = toLayer; count++; }
+    foreach (var a in c.Arcs.Cast<PcbArc>()) if (a.Layer == fromLayer) { a.Layer = toLayer; count++; }
+    foreach (var f in c.Fills.Cast<PcbFill>()) if (f.Layer == fromLayer) { f.Layer = toLayer; count++; }
+    foreach (var r in c.Regions.Cast<PcbRegion>())
+        if (r.Layer == fromLayer) { r.Layer = toLayer; r.V7LayerName = layerName; count++; }
+    foreach (var tx in c.Texts.Cast<PcbText>()) if (tx.Layer == fromLayer) { tx.Layer = toLayer; count++; }
+    foreach (var p in c.Pads.Cast<PcbPad>()) if (p.Layer == fromLayer) { p.Layer = toLayer; count++; }
+    foreach (var v in c.Vias.Cast<PcbVia>()) if (v.Layer == fromLayer) { v.Layer = toLayer; count++; }
+    SyncSmartUnions(c, fromLayer, toLayer);
+    return count;
+}
+
+// Altium's "linked shape" tools (e.g. Place Rectangle, which draws 4 tracks whose corners stay
+// joined so they scale together) cache a SEPARATE copy of the group's layer in a "SmartUnion" record
+// at the footprint header level — not on any individual primitive. This reader has no typed model for
+// it (it's an opaque per-file feature list, round-tripped verbatim through PcbComponent's
+// AdditionalParameters catch-all — see PcbLibReader.ApplyComponentParameters), so reassigning the
+// member primitives' own Layer fields leaves this cached copy stale: Altium trusts the SmartUnion
+// record over the primitives when it re-groups them, so the group visually stays on the old layer
+// even though every individual track correctly reports the new one. Patch the embedded
+// "LAYER<EQ>{name}<Pipe>" token (Altium escapes '=' and '|' inside this nested sub-record since the
+// outer parameter block already uses them as its own delimiters) directly in the raw string.
+static void SyncSmartUnions(PcbComponent c, int fromLayer, int toLayer)
+{
+    if (c.AdditionalParameters is null) return;
+    var fromTag = $"LAYER<EQ>{PcbDocWriter.LayerByteToName(fromLayer)}<Pipe>";
+    var toTag = $"LAYER<EQ>{PcbDocWriter.LayerByteToName(toLayer)}<Pipe>";
+    if (fromTag == toTag) return;
+
+    foreach (var key in c.AdditionalParameters.Keys.Where(k => k.StartsWith("SMARTUNION_ITEM", StringComparison.OrdinalIgnoreCase)).ToList())
+    {
+        var value = c.AdditionalParameters[key];
+        if (value.Contains(fromTag, StringComparison.Ordinal))
+            c.AdditionalParameters[key] = value.Replace(fromTag, toTag, StringComparison.Ordinal);
+    }
+}
 
 static string ToHex(uint argb) => $"#{(argb >> 16) & 0xFF:X2}{(argb >> 8) & 0xFF:X2}{argb & 0xFF:X2}";
 
 // Standard layers (copper, silk, paste, solder, drill, multi-layer, ...) use the same small integer
 // in this reader's internal IDs as Altium's own UI/scripting refer to them by, so showing the id
 // verbatim is correct and familiar. Mechanical layers are different: this reader's internal IDs pack
-// the original 16 mechanical slots into 57-72, and an extended 17-32 range into 83-98 (both this file
-// format's own offsets — see PcbLibReader.ResolveExtendedMechanicalLayer), but Altium's UI and
-// scripting API call them "Mechanical 1" through "Mechanical 32" — the number a user actually
-// recognizes and compares between libraries (e.g. "Courtyard on Mechanical 15 in one library vs.
-// Mechanical 16 in another"). Convert back to that 1-32 index so the bracketed number means what a
-// human auditing the library expects, not this reader's internal offset.
+// the original 16 mechanical slots into 57-72, and any higher mechanical number into 1000+N (both this
+// file format's own offsets — see PcbLibReader.MechanicalLayerId), but Altium's UI and scripting API
+// call them "Mechanical 1", "Mechanical 2", etc. with no fixed upper bound (confirmed live up to at
+// least Mechanical 89) — the number a user actually recognizes and compares between libraries (e.g.
+// "Courtyard on Mechanical 15 in one library vs. Mechanical 16 in another"). Convert back to that
+// native index so the bracketed number means what a human auditing the library expects, not this
+// reader's internal offset.
 static int DisplayLayerNumber(int id) => id switch
 {
     >= 57 and <= 72 => id - 56,   // Mechanical 1-16
-    >= 83 and <= 98 => id - 66,   // Mechanical 17-32 (extended range)
+    >= 1017 => id - 1000,          // Mechanical N>16 (extended range)
     _ => id,
 };
 
@@ -236,19 +343,31 @@ record RenderRequest(string Id, int Index, int? Width, int? Height);
 // The audit-report request sent by the front-end: which layer IDs the user has marked legal.
 record ReportRequest(string Id, List<int>? LegalLayers);
 
+// One reassignment rule: move everything of Kind ("Primitive" or "3D Body") on FromLayer to ToLayer.
+record ReassignRule(int FromLayer, string Kind, int ToLayer);
+
+// The reassignment request: apply a batch of rules to one footprint.
+record ReassignRequest(string Id, int Index, List<ReassignRule> Reassignments);
+
+// The export request: just the library id — the whole (possibly reassigned) library is serialized.
+record ExportRequest(string Id);
+
 // A tiny bounded in-memory cache of parsed libraries, so switching footprints re-renders without
 // re-uploading. LayerNames is that file's own layer-stack table (layer id -> display name), captured
-// once at upload time since it's per-file, not a fixed global table.
+// once at upload time since it's per-file, not a fixed global table. Library is the original parsed
+// object — retained (not just the flat Components list) so /api/export can re-serialize it, since
+// Components share the same object references Library holds internally, in-memory reassignments via
+// ReassignLayer are already reflected there with no extra bookkeeping.
 sealed class LibraryCache
 {
     private const int Capacity = 8;
-    private readonly ConcurrentDictionary<string, (List<PcbComponent> Components, Dictionary<int, string> LayerNames, long Seq)> _items = new();
+    private readonly ConcurrentDictionary<string, (PcbLibrary Library, List<PcbComponent> Components, Dictionary<int, string> LayerNames, string Name, long Seq)> _items = new();
     private long _seq;
 
-    public string Add(List<PcbComponent> components, Dictionary<int, string> layerNames)
+    public string Add(PcbLibrary library, List<PcbComponent> components, Dictionary<int, string> layerNames, string name)
     {
         var id = Guid.NewGuid().ToString("N");
-        _items[id] = (components, layerNames, Interlocked.Increment(ref _seq));
+        _items[id] = (library, components, layerNames, name, Interlocked.Increment(ref _seq));
         while (_items.Count > Capacity)
         {
             var oldest = _items.OrderBy(kv => kv.Value.Seq).First().Key;
@@ -257,6 +376,6 @@ sealed class LibraryCache
         return id;
     }
 
-    public (List<PcbComponent> Components, Dictionary<int, string> LayerNames)? Get(string? id) =>
-        id is not null && _items.TryGetValue(id, out var v) ? (v.Components, v.LayerNames) : null;
+    public (PcbLibrary Library, List<PcbComponent> Components, Dictionary<int, string> LayerNames, string Name)? Get(string? id) =>
+        id is not null && _items.TryGetValue(id, out var v) ? (v.Library, v.Components, v.LayerNames, v.Name) : null;
 }

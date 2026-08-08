@@ -927,15 +927,23 @@ public sealed class PcbLibReader
         reader.Skip(4); // remaining reserved
     }
 
+    // Converts an absolute Altium "Mechanical N" number into this reader's internal layer id. N 1-16
+    // keeps the reader's original 57-72 numbering unchanged (so existing consumers of that range are
+    // unaffected). Altium actually supports far more than the 16 mechanical layers that numbering was
+    // designed for — confirmed empirically up to at least Mechanical 89 — so N 17+ uses a large,
+    // collision-free offset since ids 1-98 are otherwise fully allocated to other layer kinds. There is
+    // deliberately no upper bound: Altium's own limit (if any) is unknown, and this scheme has headroom
+    // regardless.
+    internal static int MechanicalLayerId(int mechanicalNumber) =>
+        mechanicalNumber <= 16 ? 56 + mechanicalNumber : 1000 + mechanicalNumber;
+
     // Altium's per-primitive "common data" layer field is a single byte, inherited from when Altium
-    // only supported 16 mechanical layers (57-72 in this reader's numbering). Later Altium versions
-    // added Mechanical layers 17-32, but a primitive placed on one of those still carries the OLD byte
-    // clamped to Mechanical16 (72) for backward compatibility with older readers — the true layer is
-    // only recoverable from the text-based layer name some primitive kinds (Region, ComponentBody)
-    // additionally carry, e.g. "MECHANICAL23". Binary-only primitives (Track/Arc/Fill/Pad/Via) have no
-    // such text field in this file format, so they stay clamped — a genuine format limitation, not a
-    // bug here.
-    // Maps to ids 83-98 (Mechanical17=83 .. Mechanical32=98): unused id space right after ViaHoles(82).
+    // only supported 16 mechanical layers (57-72 in this reader's numbering). A primitive placed on any
+    // later-added mechanical layer still carries the OLD byte clamped to Mechanical16 (72) for backward
+    // compatibility with older readers — the true layer is only recoverable from the text-based layer
+    // name some primitive kinds (Region, ComponentBody) additionally carry, e.g. "MECHANICAL23".
+    // Binary-only primitives (Track/Arc/Fill/Pad/Via) have no such text field in this file format;
+    // see <see cref="ResolveMechanicalLayerByte"/> for how those recover it instead.
     internal static int ResolveExtendedMechanicalLayer(int legacyLayer, string? layerNameText)
     {
         if (layerNameText is not null)
@@ -943,27 +951,28 @@ public sealed class PcbLibReader
             var name = layerNameText.Replace(" ", "").Replace("-", "");
             if (name.StartsWith("MECHANICAL", StringComparison.OrdinalIgnoreCase) &&
                 int.TryParse(name.AsSpan("MECHANICAL".Length), out var n) &&
-                n is >= 17 and <= 32)
+                n > 16)
             {
-                return 66 + n;
+                return MechanicalLayerId(n);
             }
         }
         return legacyLayer;
     }
 
     // A second, previously-unused byte in each primitive's binary record reliably carries the TRUE
-    // 1-32 mechanical-layer index whenever the legacy single-byte layer field (offset 0) indicates a
+    // mechanical-layer index whenever the legacy single-byte layer field (offset 0) indicates a
     // mechanical layer at all — including the un-clamped 1-16 case, where it simply agrees with the
-    // legacy byte (e.g. legacy=57, this byte=1). Only trust it when the legacy byte says "mechanical"
-    // (57-72): outside that range this byte holds unrelated data specific to the primitive's own
-    // record layout. The byte's offset differs per primitive type (Track: 41, Text: 226) since each
-    // has its own binary layout; found empirically by diffing known-good Altium layer assignments
-    // (confirmed live in Altium) against this reader's parse of the same file.
+    // legacy byte (e.g. legacy=57, this byte=1) — with no upper limit; confirmed live against Altium up
+    // to Mechanical 89. Only trust it when the legacy byte says "mechanical" (57-72): outside that range
+    // this byte holds unrelated data specific to the primitive's own record layout. The byte's offset
+    // differs per primitive type (Track: 41, Text: 226) since each has its own binary layout; found
+    // empirically by diffing known-good Altium layer assignments (confirmed live in Altium, including a
+    // full-coordinate CSV export cross-check) against this reader's parse of the same file.
     internal static int ResolveMechanicalLayerByte(byte legacyLayer, byte mechanicalIndexByte)
     {
         if (legacyLayer is < 57 or > 72) return legacyLayer;
-        if (mechanicalIndexByte is < 1 or > 32) return legacyLayer;
-        return mechanicalIndexByte <= 16 ? 56 + mechanicalIndexByte : 66 + mechanicalIndexByte;
+        if (mechanicalIndexByte < 1) return legacyLayer;
+        return MechanicalLayerId(mechanicalIndexByte);
     }
 
     internal static CoordPoint ReadCoordPoint(BinaryFormatReader reader)
@@ -996,7 +1005,7 @@ public sealed class PcbLibReader
             .Radius(Coord.FromRaw(I32(21)))
             .Angles(Dbl(25), Dbl(33))
             .Width(Coord.FromRaw(I32(41)))
-            .Layer(layer)
+            .Layer(ResolveMechanicalLayerByte(layer, B(52)))
             .Build();
 
         arc.NetIndex = U16(3);                                  // 3-4 net index
@@ -1610,7 +1619,7 @@ public sealed class PcbLibReader
             .From(Coord.FromRaw(I32(13)), Coord.FromRaw(I32(17)))
             .To(Coord.FromRaw(I32(21)), Coord.FromRaw(I32(25)))
             .Rotation(Dbl(29))
-            .OnLayer(layer)
+            .OnLayer(ResolveMechanicalLayerByte(layer, B(42)))
             .Build();
 
         fill.NetIndex = U16(3);                                  // 3-4 net index

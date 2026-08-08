@@ -16,7 +16,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyDescriptionAttribute(("High-performance library for reading and writing Altium Designer files (.PcbLib, " +
     ".SchLib, .PcbDoc, .SchDoc)"))]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("2.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.0.0-alpha.1+b497ebfe51cd2f46f5a993eb1b392a5e9f961702")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.0.0-alpha.1+0d1034d95089b9c7348f3a25cebad044940303e4")]
 [assembly: System.Reflection.AssemblyProductAttribute("OriginalCircuit.Altium")]
 [assembly: System.Reflection.AssemblyTitleAttribute("OriginalCircuit.Altium")]
 [assembly: System.Reflection.AssemblyVersionAttribute("2.0.0.0")]
