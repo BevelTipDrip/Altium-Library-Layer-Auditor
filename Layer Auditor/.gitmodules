@@ -1,0 +1,12 @@
+[submodule "shared/OriginalCircuit.Eda.Abstractions"]
+	path = shared/OriginalCircuit.Eda.Abstractions
+	url = https://github.com/BevelTipDrip/OriginalCircuit.Eda.Abstractions.git
+[submodule "shared/OriginalCircuit.Eda.Rendering"]
+	path = shared/OriginalCircuit.Eda.Rendering
+	url = https://github.com/BevelTipDrip/OriginalCircuit.Eda.Rendering.git
+[submodule "shared/OriginalCircuit.Mech.STEP"]
+	path = shared/OriginalCircuit.Mech.STEP
+	url = https://github.com/BevelTipDrip/OriginalCircuit.Mech.STEP.git
+[submodule "shared/OriginalCircuit.Mech.GLTF"]
+	path = shared/OriginalCircuit.Mech.GLTF
+	url = https://github.com/BevelTipDrip/OriginalCircuit.Mech.GLTF.git
