@@ -60,7 +60,7 @@ dropped anything higher).
 
 - Read: `PcbLibReader.ResolveExtendedMechanicalLayer` (`src/OriginalCircuit.Altium/Serialization/Readers/PcbLibReader.cs:947`)
 - Write (legacy byte from the text): `PcbLibWriter.LayerNameToByte`
-- Write (canonical text from a numeric layer): `PcbDocWriter.LayerByteToName` (`src/OriginalCircuit.Altium/Serialization/Writers/PcbDocWriter.cs:1142`, made `public` since callers reassigning a Region/ComponentBody's layer must also update this text field — see §6)
+- Write (canonical text from a numeric layer): `PcbDocWriter.LayerByteToName` (`src/OriginalCircuit.Altium/Serialization/Writers/PcbDocWriter.cs:1142`, made `public` since callers reassigning a Region/ComponentBody's layer must also update this text field — see §7)
 
 ### Everything else (Track, Arc, Fill, Text, ...): a hidden second byte
 
@@ -245,7 +245,38 @@ mid-layers in *creation order*, but its UI displays them in *physical stack
 position* — the two numbers ([N] stack position vs. the "Layer N" label) are
 independent by design. Nothing to fix here; flagging so it isn't re-investigated.
 
-## 6. The "SmartUnion" trap — reassignment's biggest gotcha
+## 6. `ComponentBody.StandoffHeight` sign as a mount-side signal
+
+Came up while building content-sanity checks (empty courtyard/assembly, wrong-layer
+3D bodies — `Program.cs`'s `ContentWarnings`/`MountSide`) that needed to know which
+side of the board a footprint actually mounts on, so an empty *Bottom* Courtyard on
+a normal top-only part isn't flagged as a defect.
+
+**Finding**: `PcbComponentBody.StandoffHeight` is a signed offset from the board
+surface (Z=0), not an unsigned magnitude as its doc comment ("standoff height from
+board surface") might suggest. A normal top-mounted body sits at `StandoffHeight ≈
+0` (starts right at the surface, extends upward through `OverallHeight`). A body
+whose geometry actually dips below the board — a mid-mount/board-cutout part (e.g.
+a mid-mount USB connector whose shell passes through a cutout) — has a **negative**
+`StandoffHeight`. Confirmed against a real example from a user's library
+(`CUI-SJ-3506-SMT-TR_V`, a known mid-mount connector): `StandoffHeight = -2.74mm`,
+`OverallHeight = 3.26mm` (so the body spans roughly -2.74mm to +0.53mm — mostly
+below the board, slightly above), versus ordinary top-only parts in the same
+library sitting at `StandoffHeight ≈ 0`. This works **regardless of which layer the
+body is currently on** — useful for a body that hasn't been moved to its correct
+Top/Bottom 3D Body layer yet, since the Z-extent is independent of the nominal
+layer assignment.
+
+We only had real data for the "dips below" case (no example in hand of a genuine
+Bottom-side-only body with `StandoffHeight` deep negative and `OverallHeight`
+entirely below 0) — so `MountSide` treats "negative standoff" as a binary
+*mid-mount exception* flag ("both sides might legitimately have content, don't
+require either"), not as a general top/bottom classifier. Pad evidence (SMD pads on
+Layer 1 vs Layer 32, or `HoleSize > 0` for through-hole) is the primary mount-side
+signal; body Z-extent is only consulted as a fallback (no pads at all) or as this
+mid-mount override.
+
+## 7. The "SmartUnion" trap — reassignment's biggest gotcha
 
 This one cost the most debugging time and is the easiest to reintroduce if this
 code is touched again without reading this section.
@@ -291,7 +322,7 @@ been tested. If a future reassignment silently fails to show up in Altium despit
 looking correct in our own reader, **check `AdditionalParameters` for any embedded
 layer reference first** — this is the pattern to look for.
 
-## 7. Testing methodology that worked well
+## 8. Testing methodology that worked well
 
 For anyone extending this further:
 

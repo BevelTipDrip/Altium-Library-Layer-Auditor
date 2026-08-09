@@ -153,10 +153,20 @@ app.MapPost("/api/render.svg", async (RenderRequest req, LibraryCache cache, Can
         kinds = kindsByLayer.TryGetValue(id, out var k) ? k : new List<string>(),
     });
 
-    return Results.Json(new { svg = svgText, layers });
+    // Content-sanity warnings for THIS footprint — computed live on every render (not gated behind the
+    // library-wide "Generate Report" button) so the Layers panel can reveal a reassignment dropdown for
+    // a flagged layer/kind the same way an illegal-layer flag does, as soon as the footprint is opened.
+    var contentWarnings = ContentWarnings(component, layerNames);
+
+    return Results.Json(new { svg = svgText, layers, contentWarnings });
 });
 
-// ── Audit report: components with primitives/3D bodies on layers not in the "legal" set ──────
+// ── Audit report: components with primitives/3D bodies on layers not in the "legal" set, PLUS
+// content warnings — footprints that use only legal layers but still have something wrong that the
+// legal/illegal check can never see (e.g. a stray track on the Top 3D Body layer, or no 3D body at
+// all). The two are reported separately (red "issues" vs. yellow "warnings" client-side) since they're
+// different kinds of problem: one is "this layer shouldn't be used," the other is "this specific,
+// otherwise-legal layer doesn't have what it should."
 app.MapPost("/api/report", (ReportRequest req, LibraryCache cache) =>
 {
     var entry = cache.Get(req.Id);
@@ -167,8 +177,12 @@ app.MapPost("/api/report", (ReportRequest req, LibraryCache cache) =>
     string NameOf(int id) => FormatLayerName(id, layerNames.TryGetValue(id, out var n) ? n : LayerColors.GetName(id));
 
     var componentReports = new List<object>();
+    var issueComponents = 0;
     var totalIssues = 0;
+    var warningComponents = 0;
+    var totalWarnings = 0;
     var body = new StringBuilder();
+    var warningBody = new StringBuilder();
 
     foreach (var component in components)
     {
@@ -178,28 +192,50 @@ app.MapPost("/api/report", (ReportRequest req, LibraryCache cache) =>
             .Select(g => new { layerId = g.Key.Layer, layerName = NameOf(g.Key.Layer), kind = g.Key.Kind, count = g.Count() })
             .OrderBy(i => i.layerId).ThenBy(i => i.kind)
             .ToList();
+        var warnings = ContentWarnings(component, layerNames);
 
-        if (issues.Count == 0) continue;
+        if (issues.Count == 0 && warnings.Count == 0) continue;
 
-        totalIssues += issues.Sum(i => i.count);
-        componentReports.Add(new { name = component.Name, issues });
+        var name = string.IsNullOrWhiteSpace(component.Name) ? "(unnamed)" : component.Name;
+        componentReports.Add(new { name = component.Name, issues, warnings });
 
-        body.AppendLine();
-        body.AppendLine(string.IsNullOrWhiteSpace(component.Name) ? "(unnamed)" : component.Name);
-        foreach (var i in issues)
-            body.AppendLine($"    {i.count,4}  {i.kind,-10} {i.layerName}");
+        if (issues.Count > 0)
+        {
+            issueComponents++;
+            totalIssues += issues.Sum(i => i.count);
+            body.AppendLine();
+            body.AppendLine(name);
+            foreach (var i in issues)
+                body.AppendLine($"    {i.count,4}  {i.kind,-10} {i.layerName}");
+        }
+
+        if (warnings.Count > 0)
+        {
+            warningComponents++;
+            totalWarnings += warnings.Count;
+            warningBody.AppendLine();
+            warningBody.AppendLine(name);
+            foreach (var w in warnings)
+                warningBody.AppendLine($"    - {w.Message}");
+        }
     }
 
-    var header = componentReports.Count == 0
+    var header = issueComponents == 0
         ? "No illegal layer usage found."
-        : $"{componentReports.Count} component(s) with illegal layer usage — {totalIssues} issue(s) total.";
+        : $"{issueComponents} component(s) with illegal layer usage — {totalIssues} issue(s) total.";
+    var warningHeader = warningComponents == 0
+        ? "No content warnings found."
+        : $"{warningComponents} component(s) with content warnings — {totalWarnings} warning(s) total.";
 
-    var text = $"Illegal Layer Usage Report\n{new string('=', 40)}\n{header}\n{body}";
+    var text = $"Illegal Layer Usage Report\n{new string('=', 40)}\n{header}\n{body}\n" +
+               $"Content Warnings\n{new string('=', 40)}\n{warningHeader}\n{warningBody}";
 
     return Results.Json(new
     {
-        componentCount = componentReports.Count,
+        componentCount = issueComponents,
         totalIssues,
+        warningComponentCount = warningComponents,
+        totalWarnings,
         components = componentReports,
         text,
     });
@@ -444,6 +480,147 @@ static IEnumerable<(int Layer, string Kind)> AuditEntries(PcbComponent c)
     foreach (var v in c.Vias.Cast<PcbVia>()) yield return (v.Layer, "Primitive");
     foreach (var b in c.ComponentBodies) yield return (b.Layer, "3D Body");
 }
+
+// Maps this library's own conventional layer names (case-insensitive, e.g. "Top 3D Body" — set via
+// Altium's Mechanical Layer Editor "Layer Type" field) back to their numeric id, for the content
+// checks below. Ids vary per library, but a footprint author who assigned a layer that Type expects
+// it to be called exactly that in every library that follows the convention.
+static Dictionary<string, int> LayersByName(Dictionary<int, string> layerNames)
+{
+    var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    foreach (var (id, name) in layerNames)
+        if (!string.IsNullOrWhiteSpace(name) && !map.ContainsKey(name.Trim()))
+            map[name.Trim()] = id;
+    return map;
+}
+
+// Advisory content checks, independent of the legal/illegal layer audit — these catch a footprint
+// that only uses legal layers but still has something wrong that "is this layer legal" can never see:
+// a stray track on the 3D-body layer, a missing 3D body, a 3D body on the wrong layer, an empty
+// courtyard/assembly outline. Keyed off the conventional names above rather than raw ids; a check is
+// skipped entirely (not flagged) if the library never named the corresponding layer, since there's
+// nothing to check against.
+static List<ContentWarning> ContentWarnings(PcbComponent c, Dictionary<int, string> layerNames)
+{
+    var byName = LayersByName(layerNames);
+    var warnings = new List<ContentWarning>();
+    int? IdOf(string name) => byName.TryGetValue(name, out var id) ? id : null;
+
+    var topBody = IdOf("Top 3D Body");
+    var bottomBody = IdOf("Bottom 3D Body");
+    var bodyLayers = new[] { topBody, bottomBody }.Where(id => id.HasValue).Select(id => id!.Value).ToList();
+
+    if (bodyLayers.Count > 0)
+    {
+        // Anything other than a 3D body on the 3D-body layer itself. LayerId+Kind are set here (unlike
+        // most other checks below) because this one is directly actionable: the front-end uses them to
+        // reveal that exact layer's "Primitives" reassignment dropdown, same as an illegal-layer flag.
+        foreach (var id in bodyLayers)
+        {
+            var nonBodyCount = AuditEntries(c).Count(e => e.Layer == id && e.Kind != "3D Body");
+            if (nonBodyCount > 0)
+                warnings.Add(new($"{layerNames[id]} has {nonBodyCount} non-3D-body item(s) on it.", id, "Primitive"));
+        }
+
+        // No 3D body anywhere on either the Top or Bottom 3D Body layer — this footprint has no 3D
+        // model at all (a normal footprint puts its body on exactly one side, never both, so this only
+        // fires when NEITHER has one). Not actionable via a reassignment dropdown — there's nothing to
+        // move, the fix is adding a body — so no LayerId/Kind.
+        var bodies = c.ComponentBodies.Cast<PcbComponentBody>().ToList();
+        if (!bodies.Any(b => bodyLayers.Contains(b.Layer)))
+            warnings.Add(new("No 3D body found on the Top or Bottom 3D Body layer.", null, null));
+
+        // A 3D body that exists, but on some other layer entirely — actionable: the front-end reveals
+        // that layer's "3D Bodies" dropdown so it can be moved to Top/Bottom 3D Body directly.
+        foreach (var g in bodies.Where(b => !bodyLayers.Contains(b.Layer)).GroupBy(b => b.Layer))
+        {
+            var name = layerNames.TryGetValue(g.Key, out var n) ? n : LayerColors.GetName(g.Key);
+            warnings.Add(new($"{g.Count()} 3D body item(s) found on '{name}' instead of Top/Bottom 3D Body.", g.Key, "3D Body"));
+        }
+    }
+
+    // Courtyard and assembly are only expected on the side a part actually mounts on — a normal
+    // top-only SMD part will never have a Bottom Courtyard, and flagging that as empty is just noise.
+    // MountSide (below) guesses which side that is; a part it can't place a bet on (side is null) skips
+    // both checks entirely rather than flag against a guess.
+    bool Empty(string layerName)
+    {
+        var id = IdOf(layerName);
+        return id is not null && !AuditEntries(c).Any(e => e.Layer == id);
+    }
+    bool Exists(string layerName) => IdOf(layerName) is not null;
+    // Empty-layer warnings carry LayerId (so the front-end can still badge that specific row) but no
+    // Kind — there's nothing sitting on the layer to reassign, the fix is adding content, not moving it.
+    void FlagEmpty(string layerName)
+    {
+        if (Empty(layerName)) warnings.Add(new($"{layerName} is empty.", IdOf(layerName), null));
+    }
+
+    var side = MountSide(c, topBody, bottomBody);
+    if (side == "top")
+    {
+        FlagEmpty("Top Courtyard");
+    }
+    else if (side == "bottom")
+    {
+        FlagEmpty("Bottom Courtyard");
+    }
+    else if (side == "both" && Exists("Top Courtyard") && Exists("Bottom Courtyard"))
+    {
+        // Through-hole / board-cutout exception: content could legitimately belong on either or both
+        // sides, so only flag the extreme case — no courtyard drawn anywhere at all.
+        if (Empty("Top Courtyard") && Empty("Bottom Courtyard"))
+            warnings.Add(new("No courtyard found on either side (through-hole / board-cutout part).", null, null));
+    }
+
+    if (side == "bottom")
+    {
+        FlagEmpty("Bottom Assembly");
+    }
+    else if (side is "top" or "both")
+    {
+        FlagEmpty("Top Assembly");
+    }
+
+    return warnings;
+}
+
+// Best-effort guess at which side of the board a footprint mounts on, so the courtyard/assembly
+// checks above only apply to the side that's actually expected to have content. Two real-world
+// exceptions widen this to "both sides legitimately might have content, don't strictly require
+// either": through-hole pads (a THT part's leads pass all the way through — connectors, mainly), and a
+// 3D body whose StandoffHeight is negative, meaning the model geometry itself dips below the board
+// surface (Z=0) — the signature of a board-cutout / mid-mount part. Confirmed against a real mid-mount
+// USB connector in a user's library: StandoffHeight -2.74mm (spanning from below the board to just
+// above it) vs. a normal top-only part's StandoffHeight of ~0 (sits entirely on/above the surface).
+// Returns null — "unknown" — when there's no pad or body evidence to go on at all (e.g. a purely
+// graphical/mechanical footprint), so the caller skips the check rather than guess.
+static string? MountSide(PcbComponent c, int? topBody, int? bottomBody)
+{
+    var pads = c.Pads.Cast<PcbPad>().ToList();
+    if (pads.Any(p => p.HoleSize > Coord.Zero)) return "both";
+    if (c.ComponentBodies.Cast<PcbComponentBody>().Any(b => b.StandoffHeight < Coord.Zero)) return "both";
+
+    var hasTopPad = pads.Any(p => p.Layer == 1);
+    var hasBottomPad = pads.Any(p => p.Layer == 32);
+    if (hasTopPad && !hasBottomPad) return "top";
+    if (hasBottomPad && !hasTopPad) return "bottom";
+    if (hasTopPad && hasBottomPad) return "both";
+
+    // No SMD/THT pad evidence at all — fall back to whichever named 3D-body layer it's actually on.
+    var bodies = c.ComponentBodies.Cast<PcbComponentBody>().ToList();
+    var onTop = topBody is not null && bodies.Any(b => b.Layer == topBody);
+    var onBottom = bottomBody is not null && bodies.Any(b => b.Layer == bottomBody);
+    if (onTop && !onBottom) return "top";
+    if (onBottom && !onTop) return "bottom";
+    return null;
+}
+
+// One content-sanity finding from ContentWarnings. LayerId/Kind are set only when the warning is
+// directly actionable via reassignment — the front-end uses them to reveal that specific layer's
+// reassignment dropdown for that specific kind, exactly like an illegal-layer flag does — and left
+// null when the fix isn't a reassignment (nothing missing has anywhere to reassign FROM).
+record ContentWarning(string Message, int? LayerId, string? Kind);
 
 // The render request sent by the front-end.
 record RenderRequest(string Id, int Index, int? Width, int? Height);

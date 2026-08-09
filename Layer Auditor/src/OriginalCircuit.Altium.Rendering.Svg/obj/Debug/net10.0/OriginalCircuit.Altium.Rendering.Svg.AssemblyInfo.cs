@@ -15,7 +15,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCopyrightAttribute("Copyright 2020-2026 Original Circuit Limited")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("SVG vector rendering for Altium Designer files")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("2.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.0.0-alpha.1+7866edc038622a4ed11f7c82a3b7e2c416922522")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.0.0-alpha.1+8759640fdfa244306643eb642a9eb8cf58a16e0e")]
 [assembly: System.Reflection.AssemblyProductAttribute("OriginalCircuit.Altium.Rendering.Svg")]
 [assembly: System.Reflection.AssemblyTitleAttribute("OriginalCircuit.Altium.Rendering.Svg")]
 [assembly: System.Reflection.AssemblyVersionAttribute("2.0.0.0")]

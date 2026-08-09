@@ -14,7 +14,7 @@
   --line:#202832; --line2:#2c3742;
   --ink:#cdd4de; --ink-dim:#7e8896; --ink-faint:#525c68;
   --copper:#d08a3f; --copper-bright:#f0a857; --copper-deep:#8a5526;
-  --phos:#54d08a; --danger:#e0664f;
+  --phos:#54d08a; --danger:#e0664f; --warn:#e0b03f;
   --r:7px;
 }
 *{box-sizing:border-box}
@@ -99,6 +99,7 @@ aside.report{border-right:none; border-left:1px solid var(--line)}
 .fp.on .n{color:var(--copper-bright); font-weight:600}
 .fp .m{font-size:9.5px; color:var(--ink-faint); letter-spacing:.05em}
 .fp .issues{flex:none; font-size:9px; font-weight:700; letter-spacing:.04em; color:#2a0d08; background:var(--danger); border-radius:8px; padding:1px 6px}
+.fp .warnings{flex:none; font-size:9px; font-weight:700; letter-spacing:.04em; color:#2a1d08; background:var(--warn); border-radius:8px; padding:1px 6px}
 .empty-list{font-size:11px; color:var(--ink-faint); padding:8px 2px}
 
 /* layer checkboxes */
@@ -132,10 +133,32 @@ aside.report{border-right:none; border-left:1px solid var(--line)}
 .reassign-row select:focus{border-color:var(--copper-deep)}
 #applyReassignBtn{margin-top:10px; width:100%}
 
+/* content-warning badge + notes (per-footprint Layers list) — independent of the illegal-layer
+   badge above: a layer can be perfectly legal but still have the wrong THING on it (e.g. a stray
+   track on the Top 3D Body layer), which is what this flags. Reveals its reassignment row(s) the
+   same way .illegal does, via the separate .content-flag class on just the affected row(s). */
+.warn-badge{display:none; flex:none; font-size:8.5px; font-weight:700; letter-spacing:.06em; color:#2a1d08; background:var(--warn); border-radius:4px; padding:1.5px 5px; margin-right:2px}
+.layer-entry.has-warning .warn-badge{display:inline-block}
+.layer-entry.has-warning .layer .name{color:#e0c078}
+.reassign-row.content-flag{display:flex}
+.warn-notes{font-size:10px; color:var(--ink-faint); line-height:1.5; padding:2px 0 6px 25px}
+
 /* library-defined layers with nothing on the CURRENT footprint yet — still listed as valid
    reassignment targets, just visually muted and non-interactive (nothing to toggle) */
 .empty-badge{flex:none; font-size:8.5px; font-weight:700; letter-spacing:.06em; color:var(--ink-faint); background:var(--panel2); border:1px solid var(--line2); border-radius:4px; padding:1.5px 5px; margin-right:2px; text-transform:uppercase}
 .layer-entry.empty-entry .layer{opacity:.55; cursor:default}
+.layer-entry.empty-entry.has-warning .layer{opacity:1}
+
+/* collapsible layer groups (Legal Layers' Standard/Mechanical, and Layers' "Defined, unused") */
+.layer-group{margin:10px 0 2px}
+.layer-group:first-child{margin-top:0}
+.layer-group summary{cursor:pointer; list-style:none; font-size:9px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-faint); display:flex; align-items:center; gap:6px; padding:2px 0; user-select:none}
+.layer-group summary::-webkit-details-marker{display:none}
+.layer-group summary::before{content:"▸"; font-size:8px; color:var(--copper); transition:transform .15s; flex:none}
+.layer-group[open] > summary::before{transform:rotate(90deg)}
+.layer-group summary::after{content:""; flex:1; height:1px; background:var(--line2)}
+.layer-group summary .cnt{color:var(--ink-faint); font-weight:400; letter-spacing:0; text-transform:none; font-size:9px}
+.layer-group summary:hover{color:var(--copper-bright)}
 
 /* click-to-select a primitive in the render, then reassign it individually */
 #pan svg g[id^="p-"]{cursor:pointer}
@@ -148,17 +171,16 @@ aside.report{border-right:none; border-left:1px solid var(--line)}
 #selPrimSec .hint{font-size:10px; color:var(--ink-faint); line-height:1.5; margin-top:9px}
 #spAssignBtn{margin-top:10px; width:100%}
 
-/* legal-layers group labels */
-.group-label{font-size:9px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-faint); margin:10px 0 2px; display:flex; align-items:center; gap:6px}
-.group-label:first-child{margin-top:0}
-.group-label::after{content:""; flex:1; height:1px; background:var(--line2)}
 #genReportBtn{margin-top:12px; width:100%}
 
 /* report panel */
 .report{display:flex; flex-direction:column}
 .report .sec{flex:1; display:flex; flex-direction:column; min-height:0}
-.report-summary{font-size:11px; color:var(--ink-dim); margin-bottom:10px; padding:8px 10px; background:var(--panel2); border-radius:var(--r); border:1px solid var(--line2)}
-.report-summary.has-issues{color:#f3b6a9; border-color:var(--danger)}
+.report-summary{font-size:11px; color:var(--ink-dim); margin-bottom:10px; padding:8px 10px; background:var(--panel2); border-radius:var(--r); border:1px solid var(--line2); display:flex; flex-direction:column; gap:4px}
+.report-summary .issues-line.has-issues{color:#f3b6a9}
+.report-summary .warnings-line.has-warnings{color:#f0d99a}
+.report-summary.has-issues{border-color:var(--danger)}
+.report-summary.has-warnings:not(.has-issues){border-color:var(--warn)}
 #reportText{
   flex:1; min-height:0; overflow-y:auto; margin:0; padding:10px 11px; background:var(--panel2);
   border:1px solid var(--line2); border-radius:var(--r); font-family:inherit; font-size:11px;
@@ -342,7 +364,9 @@ const state = {
   libraryLayers:[],    // every layer the library defines (used or not), from /api/upload
   legal:{},            // layerId(number) -> bool legal, library-wide (the audit checklist)
   lastLayers:null,     // the `layers` array from the last successful render, for refreshLayerList()
-  issuesByName:{},     // footprint name -> total issue count, from the last generated report
+  lastContentWarnings:[], // the `contentWarnings` array from the last successful render (current footprint)
+  issuesByName:{},     // footprint name -> total illegal-layer issue count, from the last generated report
+  warningsByName:{},   // footprint name -> content-warning count, from the last generated report
   selPrims:[],         // [{el, kind, index, layerId}, ...] — the current multi-selection (shift+click, or Tab-expanded)
   view:{scale:1, x:0, y:0}, fit:1,
 };
@@ -393,7 +417,7 @@ async function upload(file){
     if(!res.ok) throw new Error(data.error||'upload failed');
     clearPrimSelection();
     state.id=data.id; state.name=data.name; state.footprints=data.footprints; state.selected=-1;
-    state.libraryLayers=data.libraryLayers; state.issuesByName={}; state.lastLayers=null;
+    state.libraryLayers=data.libraryLayers; state.issuesByName={}; state.warningsByName={}; state.lastLayers=null;
     $('#fpSearch').disabled=false; $('#fpSearch').value='';
     $('#exportLibBtn').disabled=false;
     renderFpList('');
@@ -411,9 +435,10 @@ function renderFpList(filter){
   if(!state.filtered.length){ list.innerHTML=`<div class="empty-list">${state.footprints.length? 'No match.' : 'No library loaded yet.'}</div>`; return; }
   list.innerHTML = state.filtered.map(f=>{
     const issues=state.issuesByName[f.name]||0;
+    const warnings=state.warningsByName[f.name]||0;
     return `
     <div class="fp${f.index===state.selected?' on':''}" data-index="${f.index}">
-      <span class="row1"><span class="n">${escapeHtml(f.name)}</span>${issues?`<span class="issues">${issues}</span>`:''}</span>
+      <span class="row1"><span class="n">${escapeHtml(f.name)}</span>${issues?`<span class="issues">${issues}</span>`:''}${warnings?`<span class="warnings">${warnings}</span>`:''}</span>
       <span class="m">${f.widthMm} × ${f.heightMm} mm · ${f.pads} pad${f.pads===1?'':'s'}</span>
     </div>`;
   }).join('');
@@ -456,6 +481,7 @@ async function render(){
     const svg=pan.querySelector('svg');
     if(svg){ svg.removeAttribute('width'); svg.removeAttribute('height'); stage.classList.remove('empty'); }
     state.lastLayers=data.layers;
+    state.lastContentWarnings=data.contentWarnings||[];
     buildLayerList(data.layers);
     fitView(); applyLayers();
     setStatus('on', `${state.name} · ${state.footprints[state.selected].name}`);
@@ -475,36 +501,60 @@ function buildLayerList(layers){
 
   if(!layers.length && !emptyLayers.length){ box.innerHTML='<div id="noLayers">This footprint has no drawable primitives.</div>'; return; }
 
+  // Content warnings (from the last render) grouped by layer — independent of the illegal-layer
+  // checklist, since a layer can be perfectly legal but still have the wrong thing on it. A warning
+  // with a Kind is directly actionable (something specific sits there that should move); one without
+  // just means "look at this layer," with nothing to reassign.
+  const warnByLayer={};
+  (state.lastContentWarnings||[]).forEach(w=>{
+    if(w.layerId==null) return;
+    (warnByLayer[w.layerId] ||= []).push(w);
+  });
+
   const usedRows = layers.map(l=>{
-    const reassignRows = (l.kinds||[]).map(kind => `
-      <div class="reassign-row" data-layer="${l.id}" data-kind="${escapeHtml(kind)}">
+    const layerWarnings=warnByLayer[l.id]||[];
+    const flaggedKinds=new Set(layerWarnings.filter(w=>w.kind).map(w=>w.kind));
+    const reassignRows = (l.kinds||[]).map(kind => {
+      const flagged=flaggedKinds.has(kind);
+      return `
+      <div class="reassign-row${flagged?' content-flag':''}" data-layer="${l.id}" data-kind="${escapeHtml(kind)}">
         <span class="rk">${kind==='3D Body'?'3D Bodies':'Primitives'}</span>
         <select>
           <option value="">— target layer —</option>
-          ${legalLayerOptions()}
+          ${flagged ? allLayerOptions() : legalLayerOptions()}
         </select>
-      </div>`).join('');
+      </div>`;
+    }).join('');
+    const notes = layerWarnings.length ? `<div class="warn-notes">${layerWarnings.map(w=>escapeHtml(w.message)).join('<br>')}</div>` : '';
     return `
-    <div class="layer-entry" data-layer="${l.id}">
+    <div class="layer-entry${layerWarnings.length?' has-warning':''}" data-layer="${l.id}">
       <label class="layer">
         <input type="checkbox" checked>
         <span class="illegal-badge">ILLEGAL</span>
+        <span class="warn-badge">CONTENT</span>
         <span class="name">${escapeHtml(l.name)}</span>
         <span class="dot" style="background:${l.color}"></span>
       </label>
       ${reassignRows}
+      ${notes}
     </div>`;
   }).join('');
 
-  const emptyRows = emptyLayers.length ? `<div class="group-label">Defined, unused on this footprint</div>` +
-    emptyLayers.map(l => `
-    <div class="layer-entry empty-entry" data-layer="${l.id}">
+  const emptyRows = emptyLayers.length ? `<details class="layer-group" open><summary>Defined, unused on this footprint <span class="cnt">(${emptyLayers.length})</span></summary>` +
+    emptyLayers.map(l => {
+      const layerWarnings=warnByLayer[l.id]||[];
+      const notes = layerWarnings.length ? `<div class="warn-notes">${layerWarnings.map(w=>escapeHtml(w.message)).join('<br>')}</div>` : '';
+      return `
+    <div class="layer-entry empty-entry${layerWarnings.length?' has-warning':''}" data-layer="${l.id}">
       <div class="layer">
         <span class="empty-badge">empty</span>
+        <span class="warn-badge">CONTENT</span>
         <span class="name">${escapeHtml(l.name)}</span>
         <span class="dot" style="background:${l.color}"></span>
       </div>
-    </div>`).join('') : '';
+      ${notes}
+    </div>`;
+    }).join('') + `</details>` : '';
 
   box.innerHTML = usedRows + emptyRows;
   box.querySelectorAll('.layer-entry').forEach(entry=>{
@@ -534,9 +584,16 @@ function legalLayerOptions(){
     .join('');
 }
 
-// Every layer the library defines, used or not — the picker for a manually-selected primitive isn't
-// restricted to the "legal" set the way bulk audit-driven reassignment is: this is a general-purpose
-// "move this one shape" tool, so it needs to be able to target any layer that exists.
+// Options for a reassignment target dropdown: every layer the library defines, used or not — for
+// content-warning-driven and manual per-primitive reassignment, which aren't restricted to the
+// "legal" set the way bulk audit-driven reassignment is: the correct destination (e.g. Top 3D Body)
+// may well not be marked legal yet, so restricting to legalLayerOptions() would hide it.
+function allLayerOptions(){
+  return state.libraryLayers
+    .map(l=>`<option value="${l.id}">${escapeHtml(l.name)}</option>`)
+    .join('');
+}
+
 function layerName(id){ return (state.libraryLayers.find(l=>l.id===id)||{}).name || `Layer ${id}`; }
 
 function applyLayers(){
@@ -578,8 +635,8 @@ function buildLegalLayersList(){
   const mechanical=state.libraryLayers.filter(l=>l.mechanical);
 
   box.innerHTML =
-    (standard.length? `<div class="group-label">Standard</div>${standard.map(row).join('')}` : '') +
-    (mechanical.length? `<div class="group-label">Mechanical</div>${mechanical.map(row).join('')}` : '');
+    (standard.length? `<details class="layer-group" open><summary>Standard <span class="cnt">(${standard.length})</span></summary>${standard.map(row).join('')}</details>` : '') +
+    (mechanical.length? `<details class="layer-group" open><summary>Mechanical <span class="cnt">(${mechanical.length})</span></summary>${mechanical.map(row).join('')}</details>` : '');
 
   box.querySelectorAll('[data-layer]').forEach(el=>{
     el.querySelector('input').addEventListener('change', e=>{
@@ -617,15 +674,25 @@ async function generateReport(){
     if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error||'report failed'); }
     const data=await res.json();
 
-    state.issuesByName={};
-    data.components.forEach(c=>{ state.issuesByName[c.name]=c.issues.reduce((s,i)=>s+i.count,0); });
+    state.issuesByName={}; state.warningsByName={};
+    data.components.forEach(c=>{
+      state.issuesByName[c.name]=c.issues.reduce((s,i)=>s+i.count,0);
+      state.warningsByName[c.name]=c.warnings.length;
+    });
     renderFpList($('#fpSearch').value);
 
     const summary=$('#reportSummary');
-    summary.textContent = data.componentCount
+    const issuesLine = data.componentCount
       ? `${data.componentCount} component(s) with illegal layer usage — ${data.totalIssues} issue(s) total.`
       : 'No illegal layer usage found.';
+    const warningsLine = data.warningComponentCount
+      ? `${data.warningComponentCount} component(s) with content warnings — ${data.totalWarnings} warning(s) total.`
+      : 'No content warnings found.';
+    summary.innerHTML =
+      `<span class="issues-line${data.componentCount?' has-issues':''}">${escapeHtml(issuesLine)}</span>` +
+      `<span class="warnings-line${data.warningComponentCount?' has-warnings':''}">${escapeHtml(warningsLine)}</span>`;
     summary.classList.toggle('has-issues', data.componentCount>0);
+    summary.classList.toggle('has-warnings', data.warningComponentCount>0);
     $('#reportText').textContent = data.text;
     $('#copyReportBtn').disabled = $('#downloadReportBtn').disabled = false;
     setStatus('on', state.name||'');
@@ -634,7 +701,7 @@ async function generateReport(){
 
 function resetReportPanel(){
   $('#reportSummary').textContent='Mark legal layers on the left, then generate a report.';
-  $('#reportSummary').classList.remove('has-issues');
+  $('#reportSummary').classList.remove('has-issues','has-warnings');
   $('#reportText').textContent='No report generated yet.';
   $('#copyReportBtn').disabled=$('#downloadReportBtn').disabled=true;
 }
