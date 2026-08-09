@@ -60,7 +60,7 @@ dropped anything higher).
 
 - Read: `PcbLibReader.ResolveExtendedMechanicalLayer` (`src/OriginalCircuit.Altium/Serialization/Readers/PcbLibReader.cs:947`)
 - Write (legacy byte from the text): `PcbLibWriter.LayerNameToByte`
-- Write (canonical text from a numeric layer): `PcbDocWriter.LayerByteToName` (`src/OriginalCircuit.Altium/Serialization/Writers/PcbDocWriter.cs:1142`, made `public` since callers reassigning a Region/ComponentBody's layer must also update this text field — see §5)
+- Write (canonical text from a numeric layer): `PcbDocWriter.LayerByteToName` (`src/OriginalCircuit.Altium/Serialization/Writers/PcbDocWriter.cs:1142`, made `public` since callers reassigning a Region/ComponentBody's layer must also update this text field — see §6)
 
 ### Everything else (Track, Arc, Fill, Text, ...): a hidden second byte
 
@@ -161,7 +161,8 @@ The robust fix: each mechanical `LAYER_V8_{Y}` slot also carries its own
 §2's `0x0102_0000 + N` scheme) whose **low byte reliably equals the true
 mechanical number**, independent of `Y`. `LAYER_V8_{Y}MECHENABLED` presence marks a
 slot as mechanical (vs. a copper/overlay/etc. slot, whose `LAYERID` low byte means
-nothing for our purposes). This was confirmed against two independent files.
+nothing for our purposes) — but presence is **not** the same as enabled; see §4,
+which corrects an assumption this section originally made.
 
 Implementation: `PcbLayerStack.FromBoardParameters` (`PcbLayerStack.cs:101` region),
 only fills gaps the classic table left — never overrides it — since the classic
@@ -171,7 +172,71 @@ If a file has no `LAYER_V8_*` data for a given Mechanical N>16 (no custom name w
 ever set), it falls back to the generic `"Mechanical N"` from `LayerColors.GetName`
 — correct, just not pretty.
 
-## 4. Signal-layer naming confusion (not a bug — noted for future reference)
+## 4. Which layers are actually "enabled" — presence in the name table is not enough
+
+This one produced a real user-facing bug: the library's "layers this file defines"
+list (used for the Legal-Layers checklist and reassignment target pickers) was
+showing every Mid-Layer (1–30), every Internal Plane (1–16), and every Mechanical
+layer (1–32) for **every** library, regardless of what that specific library
+actually had turned on. A user with a simple 2-layer (Top/Bottom only) library with
+a handful of enabled mechanical layers (Mechanical 1, Top/Bottom 3D Body, Top/Bottom
+Courtyard, Top/Bottom Assembly, Top/Bottom Component Center, Mechanical 13/15 — 11
+mechanical layers total) instead saw all 30 Mid-Layers, all 16 Internal Planes, and
+all 32 Mechanical layers listed, none of which matched what Altium's own UI showed
+for that library.
+
+**Root cause**: Altium always writes a **full name/property template** for every
+possible layer slot — `LAYER2NAME`.."Mid-Layer 1" through `LAYER31NAME`.."Mid-Layer
+30", `LAYER39NAME`.."Internal Plane 1" through `LAYER54NAME`.."Internal Plane 16",
+and a `LAYER_V8_{Y}` entry for all 32 mechanical slots — **whether or not that slot
+is actually enabled** for this board/library. Confirmed directly against a 2-layer
+library's raw parameter dump: every unused Mid-Layer/Internal-Plane slot had a
+completely normal name, but `PREV=0` and `NEXT=0` (unlinked from the stackup chain),
+while Top(1)/Bottom(32) pointed straight at each other (`LAYER1NEXT=32`,
+`LAYER32PREV=1`). Key presence — which is all the original code checked — was
+never a signal of "this layer exists," only "this slot has a default name."
+
+The real enabled signal is **different per layer family**, and none of them is
+"the name key exists":
+
+- **Signal (Mid-Layer 2–31) and Internal Plane (39–54)**: enabled if and only if
+  linked into the Top(1)→...→Bottom(32) `PREV`/`NEXT` chain — i.e. `PREV != 0 ||
+  NEXT != 0`. A disabled template slot has both stay `0`.
+- **Mechanical (57–72, and 1000+N for 17+)**: enabled if and only if
+  `LAYER_V8_{Y}MECHENABLED` equals the literal string `"TRUE"` — checking the
+  *value*, not just key presence, is the actual fix (§3's original implementation
+  only checked presence, which is wrong — the flag exists, `TRUE` or `FALSE`, for
+  every mechanical slot regardless of enabled state). Confirmed by cross-referencing
+  each `LAYER_V8_{Y}MECHENABLED` value against its slot's `LAYERID` low byte
+  (mechanical number, per §3) and matching the result exactly against a live count
+  from Altium's own UI (11 enabled mechanical layers, exact numbers, for the test
+  library above) — including catching that **Mechanical 1–16 also have real V8
+  `MECHENABLED` entries**, which the original gap-filling logic never consulted
+  because the classic table (with no enabled concept at all) already had those ids,
+  so the V8 loop's "only fill gaps" rule skipped them silently.
+- **Fixed single-purpose layers** (Top/Bottom Layer, Overlay, Paste, Solder, Drill
+  Guide, Keep-Out, Drill Drawing, Multi-Layer, Pad/Via Holes): always enabled, no
+  flag to check — and critically, these ALSO have `PREV=NEXT=0` in the raw data
+  (same "unlinked" signature as a disabled Mid-Layer), so they must be exempted from
+  the chain check by id rather than relying on it. See `AlwaysEnabledLayers` in
+  `PcbLayerStack.cs`.
+- **ids 75–80** (Connections, Background, DRC Error Markers, Selections, Visible
+  Grid 1/2): Altium editor pseudo-layers that a primitive can never actually be
+  placed on. They pass the classic name-table scan same as everything else, so
+  they're filtered out explicitly at the app level (`Program.cs`, `/api/upload`)
+  rather than in the general-purpose `PcbLayerStack` model.
+
+Implementation: the enabled-gating pass in `PcbLayerStack.FromBoardParameters`
+(`PcbLayerStack.cs`), between the classic-table scan and the `LAYER_V8_*` scan.
+Note the separation of concerns this enables: `PcbLayerStack.Layers` answers "what
+does this library *define*," while a layer actually being *used* by a primitive
+(`PcbComponent.Tracks[i].Layer` etc.) is tracked completely independently — so a
+layer that fails the enabled check but somehow still has real content on it (a file
+in some inconsistent state) doesn't disappear from the app, it just falls back to a
+generic display name instead of whatever custom rename the layer stack would have
+given it.
+
+## 5. Signal-layer naming confusion (not a bug — noted for future reference)
 
 While chasing the above, we hit an apparent mismatch in signal/copper layer names
 ("Layer 1", "Layer 3", "Layer 5"... not matching physical stack order). This turned
@@ -180,7 +245,7 @@ mid-layers in *creation order*, but its UI displays them in *physical stack
 position* — the two numbers ([N] stack position vs. the "Layer N" label) are
 independent by design. Nothing to fix here; flagging so it isn't re-investigated.
 
-## 5. The "SmartUnion" trap — reassignment's biggest gotcha
+## 6. The "SmartUnion" trap — reassignment's biggest gotcha
 
 This one cost the most debugging time and is the easiest to reintroduce if this
 code is touched again without reading this section.
@@ -226,7 +291,7 @@ been tested. If a future reassignment silently fails to show up in Altium despit
 looking correct in our own reader, **check `AdditionalParameters` for any embedded
 layer reference first** — this is the pattern to look for.
 
-## 6. Testing methodology that worked well
+## 7. Testing methodology that worked well
 
 For anyone extending this further:
 

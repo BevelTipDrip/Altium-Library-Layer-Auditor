@@ -82,13 +82,20 @@ app.MapPost("/api/upload", async (IFormFile file, LibraryCache cache, Cancellati
         pads = c.Pads.Count,
     });
 
-    // Every layer used anywhere in the library — the master list the front-end builds its
-    // "Legal Layers" checklist from. Mechanical layers (57-72) default to unchecked/illegal since
-    // that's exactly where Altium's layer-Type-vs-number mismatches happen between libraries; the
-    // fixed-purpose layers (copper, silk, paste, solder, ...) default to legal.
-    var libraryLayers = components
-        .SelectMany(AuditEntries)
-        .Select(e => e.Layer)
+    // Every layer used anywhere in the library, PLUS every layer the library's own layer-stack header
+    // defines but that happens to have zero primitives on it anywhere yet (layerNames' keys) — the
+    // master list the front-end builds its "Legal Layers" checklist and reassignment target pickers
+    // from. Without the second half, a layer someone set up on purpose (e.g. a "Top Courtyard" that no
+    // footprint has used yet) would be invisible as a reassignment target until something already used
+    // it, defeating the point of fixing "compounded" primitives onto their own, currently-empty layer.
+    // Mechanical layers (57-72) default to unchecked/illegal since that's exactly where Altium's
+    // layer-Type-vs-number mismatches happen between libraries; the fixed-purpose layers (copper, silk,
+    // paste, solder, ...) default to legal.
+    var usedLayerIds = new HashSet<int>(components.SelectMany(AuditEntries).Select(e => e.Layer));
+    var libraryLayers = usedLayerIds
+        .Concat(layerNames.Keys)
+        .Where(l => l is not (>= 75 and <= 80)) // Connections/Background/DRC Markers/Selections/Grid 1-2:
+                                                  // Altium editor pseudo-layers, never a real primitive's home
         .Distinct()
         .OrderBy(l => l)
         .Select(l => new
@@ -97,6 +104,7 @@ app.MapPost("/api/upload", async (IFormFile file, LibraryCache cache, Cancellati
             name = FormatLayerName(l, layerNames.TryGetValue(l, out var n) ? n : LayerColors.GetName(l)),
             color = ToHex(LayerColors.GetColor(l)),
             mechanical = PcbLayerGroups.IsMechanical(l),
+            used = usedLayerIds.Contains(l),
         });
 
     return Results.Json(new
@@ -221,6 +229,47 @@ app.MapPost("/api/reassign", (ReassignRequest req, LibraryCache cache) =>
     return Results.Json(new { moved = results.Sum(r => r.moved), results });
 });
 
+// ── Reassign one: move a single clicked primitive/3D body to a new layer ──────────────────────
+// Companion to /api/reassign's by-source-layer sweep, for the case a bulk kind/layer rule can't
+// express: two DIFFERENT primitives that happen to already share one (legal or illegal) layer — e.g.
+// a "component center" mark and a courtyard outline both compounded onto the same layer — where only
+// one of them should move. The primitive is identified by the same (kind, index) pair its SVG group id
+// carries (see PcbComponentRenderer.RenderGroupedByLayer), which the front-end reads off the element
+// the user actually clicked.
+app.MapPost("/api/reassign-one", (ReassignOneRequest req, LibraryCache cache) =>
+{
+    var entry = cache.Get(req.Id);
+    if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
+    var (_, components, _, _) = entry.Value;
+    if (req.Index < 0 || req.Index >= components.Count)
+        return Results.BadRequest(new { error = "Footprint index out of range." });
+
+    var component = components[req.Index];
+    if (!ReassignOne(component, req.PrimKind, req.PrimIndex, req.ToLayer))
+        return Results.BadRequest(new { error = "That primitive is gone — the footprint was likely modified since it was rendered. Re-render and try again." });
+
+    return Results.Json(new { moved = true });
+});
+
+// ── Reassign many: move a multi-selection (shift+click, or Tab-expanded to touching primitives)
+// of individually-picked primitives/3D bodies to one new layer, in a single round-trip. Each item is
+// resolved independently through the same ReassignOne used by /api/reassign-one, so a selection that
+// spans several source layers (e.g. shift-clicking things from two different layers) works the same
+// as if each had been moved one at a time.
+app.MapPost("/api/reassign-many", (ReassignManyRequest req, LibraryCache cache) =>
+{
+    var entry = cache.Get(req.Id);
+    if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
+    var (_, components, _, _) = entry.Value;
+    if (req.Index < 0 || req.Index >= components.Count)
+        return Results.BadRequest(new { error = "Footprint index out of range." });
+
+    var component = components[req.Index];
+    var moved = req.Prims.Count(p => ReassignOne(component, p.PrimKind, p.PrimIndex, req.ToLayer));
+
+    return Results.Json(new { moved, total = req.Prims.Count });
+});
+
 // ── Export: serialize the current (possibly reassigned) in-memory library back to a .PcbLib ──────
 app.MapPost("/api/export", async (ExportRequest req, LibraryCache cache, CancellationToken ct) =>
 {
@@ -267,6 +316,65 @@ static int ReassignLayer(PcbComponent c, int fromLayer, string kind, int toLayer
     foreach (var v in c.Vias.Cast<PcbVia>()) if (v.Layer == fromLayer) { v.Layer = toLayer; count++; }
     SyncSmartUnions(c, fromLayer, toLayer);
     return count;
+}
+
+// Moves exactly one primitive/3D body — identified by the (kind, index) pair from its render-time
+// "p-{kind}-{index}" SVG group id — to a new layer. kind/index must stay index-aligned with
+// PcbComponentRenderer.Collect, since that's what the front-end's clicked element refers to. Returns
+// false if the index is out of range (stale render).
+static bool ReassignOne(PcbComponent c, string kind, int index, int toLayer)
+{
+    var layerName = PcbDocWriter.LayerByteToName(toLayer);
+    int fromLayer;
+
+    switch (kind)
+    {
+        case "Track":
+            if (index < 0 || index >= c.Tracks.Count) return false;
+            var track = (PcbTrack)c.Tracks[index];
+            fromLayer = track.Layer; track.Layer = toLayer;
+            break;
+        case "Arc":
+            if (index < 0 || index >= c.Arcs.Count) return false;
+            var arc = (PcbArc)c.Arcs[index];
+            fromLayer = arc.Layer; arc.Layer = toLayer;
+            break;
+        case "Fill":
+            if (index < 0 || index >= c.Fills.Count) return false;
+            var fill = (PcbFill)c.Fills[index];
+            fromLayer = fill.Layer; fill.Layer = toLayer;
+            break;
+        case "Region":
+            if (index < 0 || index >= c.Regions.Count) return false;
+            var region = (PcbRegion)c.Regions[index];
+            fromLayer = region.Layer; region.Layer = toLayer; region.V7LayerName = layerName;
+            break;
+        case "Text":
+            if (index < 0 || index >= c.Texts.Count) return false;
+            var text = (PcbText)c.Texts[index];
+            fromLayer = text.Layer; text.Layer = toLayer;
+            break;
+        case "Pad":
+            if (index < 0 || index >= c.Pads.Count) return false;
+            var pad = (PcbPad)c.Pads[index];
+            fromLayer = pad.Layer; pad.Layer = toLayer;
+            break;
+        case "Via":
+            if (index < 0 || index >= c.Vias.Count) return false;
+            var via = (PcbVia)c.Vias[index];
+            fromLayer = via.Layer; via.Layer = toLayer;
+            break;
+        case "Body":
+            if (index < 0 || index >= c.ComponentBodies.Count) return false;
+            var body = (PcbComponentBody)c.ComponentBodies[index];
+            body.Layer = toLayer; body.LayerName = layerName;
+            return true; // 3D bodies are never SmartUnion members — nothing else to sync.
+        default:
+            return false;
+    }
+
+    SyncSmartUnions(c, fromLayer, toLayer);
+    return true;
 }
 
 // Altium's "linked shape" tools (e.g. Place Rectangle, which draws 4 tracks whose corners stay
@@ -348,6 +456,16 @@ record ReassignRule(int FromLayer, string Kind, int ToLayer);
 
 // The reassignment request: apply a batch of rules to one footprint.
 record ReassignRequest(string Id, int Index, List<ReassignRule> Reassignments);
+
+// The single-primitive reassignment request: PrimKind/PrimIndex identify the clicked primitive the
+// same way its SVG group id does ("p-{PrimKind}-{PrimIndex}") — see PcbComponentRenderer.Collect.
+record ReassignOneRequest(string Id, int Index, string PrimKind, int PrimIndex, int ToLayer);
+
+// One primitive reference within a multi-select reassignment batch.
+record PrimRef(string PrimKind, int PrimIndex);
+
+// The multi-primitive reassignment request: every Prims entry moves to the same ToLayer.
+record ReassignManyRequest(string Id, int Index, List<PrimRef> Prims, int ToLayer);
 
 // The export request: just the library id — the whole (possibly reassigned) library is serialized.
 record ExportRequest(string Id);

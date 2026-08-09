@@ -46,4 +46,4 @@ C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\PcbLibViewer\ob
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\PcbLibViewer\obj\Debug\net10.0\PcbLibViewer.genruntimeconfig.cache
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\PcbLibViewer\obj\Debug\net10.0\ref\PcbLibViewer.dll
 C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\PcbLibViewer\obj\Debug\net10.0\PcbLibViewer.sourcelink.json
-C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\PcbLibViewer\obj\Debug\net10.0\compressed\pj4oyzn2gj-{0}-7337prispk-7337prispk.gz
+C:\Users\Ty\Documents\Altium Library Layer Auditor\Layer Auditor\PcbLibViewer\obj\Debug\net10.0\compressed\pj4oyzn2gj-{0}-rvj5w5b77a-rvj5w5b77a.gz

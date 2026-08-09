@@ -132,6 +132,22 @@ aside.report{border-right:none; border-left:1px solid var(--line)}
 .reassign-row select:focus{border-color:var(--copper-deep)}
 #applyReassignBtn{margin-top:10px; width:100%}
 
+/* library-defined layers with nothing on the CURRENT footprint yet — still listed as valid
+   reassignment targets, just visually muted and non-interactive (nothing to toggle) */
+.empty-badge{flex:none; font-size:8.5px; font-weight:700; letter-spacing:.06em; color:var(--ink-faint); background:var(--panel2); border:1px solid var(--line2); border-radius:4px; padding:1.5px 5px; margin-right:2px; text-transform:uppercase}
+.layer-entry.empty-entry .layer{opacity:.55; cursor:default}
+
+/* click-to-select a primitive in the render, then reassign it individually */
+#pan svg g[id^="p-"]{cursor:pointer}
+#pan svg g.selected-prim{filter:drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px var(--copper-bright)) drop-shadow(0 0 10px var(--copper-bright))}
+#selPrimSec select{
+  width:100%; background:var(--panel2); border:1px solid var(--line2); border-radius:var(--r); color:var(--ink);
+  font-family:inherit; font-size:11.5px; padding:8px 10px; outline:none;
+}
+#selPrimSec select:focus{border-color:var(--copper-deep)}
+#selPrimSec .hint{font-size:10px; color:var(--ink-faint); line-height:1.5; margin-top:9px}
+#spAssignBtn{margin-top:10px; width:100%}
+
 /* legal-layers group labels */
 .group-label{font-size:9px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-faint); margin:10px 0 2px; display:flex; align-items:center; gap:6px}
 .group-label:first-child{margin-top:0}
@@ -243,6 +259,20 @@ body.dragging .drop .ring{border-color:var(--copper); box-shadow:0 0 40px rgba(2
         </div>
       </div>
 
+      <div class="sec" id="selPrimSec" style="display:none">
+        <h2>Selected Primitive</h2>
+        <div class="readout" style="margin-bottom:10px">
+          <div class="wide"><div class="k">Item</div><div class="v" id="sp-kind">—</div></div>
+          <div class="wide"><div class="k">Current Layer</div><div class="v" id="sp-layer">—</div></div>
+        </div>
+        <select id="spTarget"><option value="">— target layer —</option></select>
+        <button class="btn" id="spAssignBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          Move to Layer
+        </button>
+        <div class="hint">Click a shape to select it — shift+click to add more, Tab to grab everything touching the selection on that layer — then move the whole selection at once. Useful when two different things (e.g. component center + courtyard) got compounded onto the same layer.</div>
+      </div>
+
       <div class="sec" style="flex:1">
         <h2>Layers</h2>
         <div class="layer-toolbar">
@@ -309,10 +339,11 @@ const state = {
   id:null, name:null,
   footprints:[], filtered:[], selected:-1,
   layers:{},           // layerId(number) -> bool visible, for the currently rendered footprint
-  libraryLayers:[],    // every layer used anywhere in the library, from /api/upload
+  libraryLayers:[],    // every layer the library defines (used or not), from /api/upload
   legal:{},            // layerId(number) -> bool legal, library-wide (the audit checklist)
   lastLayers:null,     // the `layers` array from the last successful render, for refreshLayerList()
   issuesByName:{},     // footprint name -> total issue count, from the last generated report
+  selPrims:[],         // [{el, kind, index, layerId}, ...] — the current multi-selection (shift+click, or Tab-expanded)
   view:{scale:1, x:0, y:0}, fit:1,
 };
 
@@ -334,6 +365,14 @@ $('#copyReportBtn').onclick = copyReport;
 $('#downloadReportBtn').onclick = downloadReport;
 $('#applyReassignBtn').onclick = applyReassignments;
 $('#exportLibBtn').onclick = exportLibrary;
+$('#spAssignBtn').onclick = assignSelectedPrim;
+window.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){ clearPrimSelection(); return; }
+  if(e.key==='Tab' && state.selPrims.length && !['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)){
+    e.preventDefault();
+    expandSelectionToTouching();
+  }
+});
 
 ['dragenter','dragover'].forEach(ev=>window.addEventListener(ev, e=>{e.preventDefault(); document.body.classList.add('dragging');}));
 ['dragleave','drop'].forEach(ev=>window.addEventListener(ev, e=>{e.preventDefault(); if(ev!=='dragleave'||e.clientX<=0) document.body.classList.remove('dragging');}));
@@ -352,6 +391,7 @@ async function upload(file){
     const res=await fetch('/api/upload',{method:'POST', body:fd});
     const data=await res.json();
     if(!res.ok) throw new Error(data.error||'upload failed');
+    clearPrimSelection();
     state.id=data.id; state.name=data.name; state.footprints=data.footprints; state.selected=-1;
     state.libraryLayers=data.libraryLayers; state.issuesByName={}; state.lastLayers=null;
     $('#fpSearch').disabled=false; $('#fpSearch').value='';
@@ -383,6 +423,7 @@ function renderFpList(filter){
 }
 
 function selectFootprint(index){
+  clearPrimSelection();
   state.selected=index;
   document.querySelectorAll('.fp').forEach(el=>el.classList.toggle('on', +el.dataset.index===index));
   const fp=state.footprints[index];
@@ -410,6 +451,7 @@ async function render(){
     if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error||'render failed'); }
     const data=await res.json();
     if(seq!==renderSeq) return;
+    clearPrimSelection(); // the SVG is about to be replaced — any selected element reference goes stale
     pan.innerHTML=data.svg;
     const svg=pan.querySelector('svg');
     if(svg){ svg.removeAttribute('width'); svg.removeAttribute('height'); stage.classList.remove('empty'); }
@@ -425,8 +467,15 @@ function buildLayerList(layers){
   state.layers={};
   layers.forEach(l=>{ state.layers[l.id]=true; });
   const box=$('#layers');
-  if(!layers.length){ box.innerHTML='<div id="noLayers">This footprint has no drawable primitives.</div>'; return; }
-  box.innerHTML = layers.map(l=>{
+
+  // Layers the library defines somewhere but that have nothing on THIS footprint yet — still worth
+  // listing so a target for splitting a compounded primitive is visible even before anything uses it.
+  const usedIds=new Set(layers.map(l=>l.id));
+  const emptyLayers=state.libraryLayers.filter(l=>!usedIds.has(l.id));
+
+  if(!layers.length && !emptyLayers.length){ box.innerHTML='<div id="noLayers">This footprint has no drawable primitives.</div>'; return; }
+
+  const usedRows = layers.map(l=>{
     const reassignRows = (l.kinds||[]).map(kind => `
       <div class="reassign-row" data-layer="${l.id}" data-kind="${escapeHtml(kind)}">
         <span class="rk">${kind==='3D Body'?'3D Bodies':'Primitives'}</span>
@@ -446,11 +495,21 @@ function buildLayerList(layers){
       ${reassignRows}
     </div>`;
   }).join('');
+
+  const emptyRows = emptyLayers.length ? `<div class="group-label">Defined, unused on this footprint</div>` +
+    emptyLayers.map(l => `
+    <div class="layer-entry empty-entry" data-layer="${l.id}">
+      <div class="layer">
+        <span class="empty-badge">empty</span>
+        <span class="name">${escapeHtml(l.name)}</span>
+        <span class="dot" style="background:${l.color}"></span>
+      </div>
+    </div>`).join('') : '';
+
+  box.innerHTML = usedRows + emptyRows;
   box.querySelectorAll('.layer-entry').forEach(entry=>{
-    entry.querySelector('input[type=checkbox]').addEventListener('change', e=>{
-      state.layers[entry.dataset.layer]=e.target.checked;
-      applyLayers();
-    });
+    const cb=entry.querySelector('input[type=checkbox]');
+    if(cb) cb.addEventListener('change', e=>{ state.layers[entry.dataset.layer]=e.target.checked; applyLayers(); });
   });
   applyIllegalBadges();
 }
@@ -459,7 +518,9 @@ function buildLayerList(layers){
 // this both shows the ILLEGAL badge and reveals that layer's reassignment dropdown(s) (CSS-gated on
 // the same .illegal class). Called both after a render and whenever the Legal Layers checklist changes.
 function applyIllegalBadges(){
-  document.querySelectorAll('#layers .layer-entry').forEach(entry=>{
+  // "Empty" entries (nothing on THIS footprint) never get the ILLEGAL badge — there's no actual
+  // usage on this footprint to flag, only a defined-but-unused layer worth showing as a target.
+  document.querySelectorAll('#layers .layer-entry:not(.empty-entry)').forEach(entry=>{
     const legal = state.legal[entry.dataset.layer];
     entry.classList.toggle('illegal', legal===false);
   });
@@ -472,6 +533,11 @@ function legalLayerOptions(){
     .map(l=>`<option value="${l.id}">${escapeHtml(l.name)}</option>`)
     .join('');
 }
+
+// Every layer the library defines, used or not — the picker for a manually-selected primitive isn't
+// restricted to the "legal" set the way bulk audit-driven reassignment is: this is a general-purpose
+// "move this one shape" tool, so it needs to be able to target any layer that exists.
+function layerName(id){ return (state.libraryLayers.find(l=>l.id===id)||{}).name || `Layer ${id}`; }
 
 function applyLayers(){
   const svg=pan.querySelector('svg'); if(!svg) return;
@@ -606,7 +672,6 @@ async function applyReassignments(){
       body:JSON.stringify({id:state.id, index:state.selected, reassignments})});
     if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error||'reassign failed'); }
     const data=await res.json();
-    const layerName=id=>(state.libraryLayers.find(l=>l.id===id)||{}).name || `Layer ${id}`;
     const detail=data.results.map(r=>`${r.kind} ${layerName(r.fromLayer)}→${layerName(r.toLayer)}: ${r.moved}`).join(' · ');
     toast(`Moved ${data.moved} item(s) on ${currentFpName()} — ${detail}`);
     await render();
@@ -624,6 +689,131 @@ async function exportLibrary(){
     const blob=await res.blob();
     download(blob, `${state.name||'library'}-edited.PcbLib`);
     toast('Exported modified library');
+  }catch(err){ toast(err.message); }
+  finally{ setStatus('on', state.name||''); }
+}
+
+// ── Primitive selection & manual reassignment ─────────
+// Each primitive in the render sits in its own "p-{kind}-{index}" SVG group (see
+// PcbComponentRenderer.RenderGroupedByLayer), nested inside that layer's "layer-{id}" group. A tap
+// (pointerdown+pointerup with no meaningful drag in between — panning uses the same pointer events)
+// walks up from the clicked element to find both ids, so one shape (or several, via shift+click / Tab)
+// can be reassigned on its own — the case bulk by-layer reassignment can't express: two different
+// things (e.g. a component-center mark and a courtyard outline) compounded onto the same one layer,
+// where only one should move.
+function handlePrimitiveClick(target, additive){
+  if(!(target instanceof Element)){ clearPrimSelection(); return; }
+  const primEl = target.closest('[id^="p-"]');
+  const m = primEl && primEl.id.match(/^p-([A-Za-z]+)-(\d+)$/);
+  if(!m){ if(!additive) clearPrimSelection(); return; }
+  const layerEl = primEl.closest('[id^="layer-"]');
+  const layerId = layerEl ? +layerEl.id.slice(6) : null;
+  if(!additive){
+    clearPrimSelection();
+    addPrimToSelection(primEl, m[1], +m[2], layerId);
+  }else{
+    togglePrimInSelection(primEl, m[1], +m[2], layerId);
+  }
+  refreshSelPrimPanel();
+}
+
+function findInSelection(kind, index){
+  return state.selPrims.findIndex(p=>p.kind===kind && p.index===index);
+}
+
+function addPrimToSelection(el, kind, index, layerId){
+  if(findInSelection(kind, index)>=0) return;
+  el.classList.add('selected-prim');
+  state.selPrims.push({el, kind, index, layerId});
+}
+
+function togglePrimInSelection(el, kind, index, layerId){
+  const i=findInSelection(kind, index);
+  if(i>=0){
+    state.selPrims[i].el.classList.remove('selected-prim');
+    state.selPrims.splice(i,1);
+  }else{
+    addPrimToSelection(el, kind, index, layerId);
+  }
+}
+
+// Tab: flood-fill outward from the current selection across every OTHER primitive on the same layer,
+// adding any whose rendered shape's bounding box touches (or overlaps) one already in the selection —
+// a geometric approximation of "connected," good enough for the common case of a multi-segment
+// courtyard/outline drawn as several separate tracks/arcs that should all move together. Restricted to
+// a single layer: mixing layers into one flood-fill wouldn't mean anything (nothing on different
+// layers ever visually "touches" in the sense this is approximating).
+function expandSelectionToTouching(){
+  if(!state.selPrims.length) return;
+  const layerId=state.selPrims[0].layerId;
+  if(state.selPrims.some(p=>p.layerId!==layerId)){ toast('Tab only expands within one layer — selection spans layers'); return; }
+  const svg=svgEl(); const layerGroup = svg && svg.querySelector(`#layer-${layerId}`);
+  if(!layerGroup) return;
+
+  const candidates=[...layerGroup.children].filter(g=>/^p-/.test(g.id));
+  const boxed=candidates.map(el=>({el, box:el.getBBox()}));
+  const pad=1.5; // px tolerance so touching endpoints (not just overlapping fills) count as connected
+  const touches=(a,b)=> !(a.x+a.width+pad<b.x || b.x+b.width+pad<a.x || a.y+a.height+pad<b.y || b.y+b.height+pad<a.y);
+
+  const selectedIds=new Set(state.selPrims.map(p=>p.el.id));
+  const queue=boxed.filter(b=>selectedIds.has(b.el.id));
+  let added=0;
+  while(queue.length){
+    const cur=queue.shift();
+    for(const cand of boxed){
+      if(selectedIds.has(cand.el.id)) continue;
+      if(!touches(cur.box, cand.box)) continue;
+      const m=cand.el.id.match(/^p-([A-Za-z]+)-(\d+)$/);
+      if(!m) continue;
+      selectedIds.add(cand.el.id);
+      addPrimToSelection(cand.el, m[1], +m[2], layerId);
+      queue.push(cand);
+      added++;
+    }
+  }
+  refreshSelPrimPanel();
+  if(!added) toast('Nothing else on this layer touches the current selection');
+}
+
+function refreshSelPrimPanel(){
+  if(!state.selPrims.length){ $('#selPrimSec').style.display='none'; return; }
+  const layerIds=new Set(state.selPrims.map(p=>p.layerId));
+  const singleLayer = layerIds.size===1 ? state.selPrims[0].layerId : null;
+
+  $('#sp-kind').textContent = state.selPrims.length===1
+    ? `${state.selPrims[0].kind} #${state.selPrims[0].index}`
+    : `${state.selPrims.length} primitives selected`;
+  $('#sp-layer').textContent = singleLayer===null ? 'multiple layers' : layerName(singleLayer);
+
+  const sel=$('#spTarget');
+  const prevValue=sel.value;
+  sel.innerHTML = '<option value="">— target layer —</option>' + state.libraryLayers
+    .map(l=>`<option value="${l.id}"${l.id===singleLayer?' disabled':''}>${escapeHtml(l.name)}${l.used?'':' (empty)'}</option>`)
+    .join('');
+  sel.value=prevValue;
+  $('#selPrimSec').style.display='';
+}
+
+function clearPrimSelection(){
+  state.selPrims.forEach(p=>p.el.classList.remove('selected-prim'));
+  state.selPrims=[];
+  $('#selPrimSec').style.display='none';
+}
+
+async function assignSelectedPrim(){
+  if(!state.id || state.selected<0 || !state.selPrims.length) return;
+  const target=$('#spTarget').value;
+  if(!target){ toast('Pick a target layer first'); return; }
+  const prims=state.selPrims.map(p=>({primKind:p.kind, primIndex:p.index}));
+  const count=prims.length;
+  setStatus('busy','reassigning…');
+  try{
+    const res=await fetch('/api/reassign-many',{method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:state.id, index:state.selected, prims, toLayer:+target})});
+    if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error||'reassign failed'); }
+    const data=await res.json();
+    toast(`Moved ${data.moved}/${count} item(s) → ${layerName(+target)}`);
+    await render();
   }catch(err){ toast(err.message); }
   finally{ setStatus('on', state.name||''); }
 }
@@ -657,9 +847,18 @@ stage.addEventListener('wheel', e=>{
   applyView();
 },{passive:false});
 let drag=null;
-pan.addEventListener('pointerdown', e=>{ drag={x:e.clientX,y:e.clientY,vx:state.view.x,vy:state.view.y}; pan.classList.add('drag'); pan.setPointerCapture(e.pointerId); });
-pan.addEventListener('pointermove', e=>{ if(!drag) return; state.view.x=drag.vx+(e.clientX-drag.x); state.view.y=drag.vy+(e.clientY-drag.y); applyView(); });
-pan.addEventListener('pointerup', ()=>{ drag=null; pan.classList.remove('drag'); });
+pan.addEventListener('pointerdown', e=>{ drag={x:e.clientX,y:e.clientY,vx:state.view.x,vy:state.view.y,moved:false,target:e.target,shiftKey:e.shiftKey}; pan.classList.add('drag'); pan.setPointerCapture(e.pointerId); });
+pan.addEventListener('pointermove', e=>{
+  if(!drag) return;
+  const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+  if(Math.abs(dx)>4 || Math.abs(dy)>4) drag.moved=true;
+  state.view.x=drag.vx+dx; state.view.y=drag.vy+dy;
+  applyView();
+});
+pan.addEventListener('pointerup', ()=>{
+  if(drag && !drag.moved) handlePrimitiveClick(drag.target, drag.shiftKey);
+  drag=null; pan.classList.remove('drag');
+});
 $('#zIn').onclick=()=>zoomBy(1.2); $('#zOut').onclick=()=>zoomBy(1/1.2); $('#zFit').onclick=fitView;
 function zoomBy(f){ state.view.scale=Math.max(state.fit*0.3, Math.min(state.fit*14, state.view.scale*f)); applyView(); }
 window.addEventListener('resize', ()=>{ if(svgEl()) fitView(); });

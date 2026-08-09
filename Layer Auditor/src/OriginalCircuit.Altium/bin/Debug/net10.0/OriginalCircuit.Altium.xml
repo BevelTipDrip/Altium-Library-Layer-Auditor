@@ -3587,7 +3587,7 @@
             Ordered list of layer entries from top to bottom.
             </summary>
         </member>
-        <member name="M:OriginalCircuit.Altium.Models.Pcb.PcbLayerStack.FromBoardParameters(System.Collections.Generic.Dictionary{System.String,System.String})">
+        <member name="F:OriginalCircuit.Altium.Models.Pcb.PcbLayerStack.AlwaysEnabledLayers">
             <summary>
             Parses a layer stack from Board6 (or PcbLib Library/Data header) parameters. The layer index
             <c>N</c> is the same numeric PCB layer ID used everywhere else (1=Top Layer, 32=Bottom Layer,

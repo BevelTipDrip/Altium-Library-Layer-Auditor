@@ -110,7 +110,7 @@ public sealed class PcbComponentRenderer
         ArgumentNullException.ThrowIfNull(component);
         ArgumentNullException.ThrowIfNull(context);
 
-        var primitives = new List<(int layer, int priority, Action render)>();
+        var primitives = new List<(int layer, int priority, string kind, int index, Action render)>();
         Collect(context, primitives,
             component.Tracks, component.Arcs, component.Fills, component.Regions,
             component.Texts, component.Pads, component.Vias, component.ComponentBodies);
@@ -120,8 +120,12 @@ public sealed class PcbComponentRenderer
     /// <summary>
     /// Renders all primitives of a PCB component, same as <see cref="Render(PcbComponent, IRenderContext)"/>,
     /// except each layer's primitives are wrapped in a named group via <see cref="IRenderContext.BeginGroup"/>
-    /// (id <c>"layer-{layerId}"</c>). A vector backend (SVG) emits an addressable <c>&lt;g id="layer-33"&gt;</c>
-    /// per layer, so a front-end can toggle individual layers on/off after export with no server round-trip.
+    /// (id <c>"layer-{layerId}"</c>), and inside that, each individual primitive gets its own nested group
+    /// (id <c>"p-{kind}-{index}"</c>, e.g. <c>"p-Track-3"</c> — the 4th track in <see cref="PcbComponent.Tracks"/>).
+    /// A vector backend (SVG) emits addressable <c>&lt;g id="layer-33"&gt;&lt;g id="p-Track-3"&gt;...&lt;/g&gt;&lt;/g&gt;</c>,
+    /// so a front-end can toggle whole layers on/off, or hit-test a click down to one primitive and look its
+    /// (kind, index) pair back up in the same component's own collections — with no server round-trip for
+    /// either.
     /// </summary>
     /// <param name="component">The PCB component to render.</param>
     /// <param name="context">The render context to draw into.</param>
@@ -131,7 +135,7 @@ public sealed class PcbComponentRenderer
         ArgumentNullException.ThrowIfNull(component);
         ArgumentNullException.ThrowIfNull(context);
 
-        var primitives = new List<(int layer, int priority, Action render)>();
+        var primitives = new List<(int layer, int priority, string kind, int index, Action render)>();
         Collect(context, primitives,
             component.Tracks, component.Arcs, component.Fills, component.Regions,
             component.Texts, component.Pads, component.Vias, component.ComponentBodies);
@@ -168,7 +172,7 @@ public sealed class PcbComponentRenderer
             context.SetClipPath(new[] { MapContour(outline) });
         }
 
-        var primitives = new List<(int layer, int priority, Action render)>();
+        var primitives = new List<(int layer, int priority, string kind, int index, Action render)>();
         Collect(context, primitives,
             document.Tracks, document.Arcs, document.Fills, document.Regions,
             VisibleBoardTexts(document.Texts, document.Components), document.Pads, document.Vias, document.ComponentBodies);
@@ -243,20 +247,22 @@ public sealed class PcbComponentRenderer
         }
     }
 
-    private static void DrawSorted(List<(int layer, int priority, Action render)> primitives)
+    private static void DrawSorted(List<(int layer, int priority, string kind, int index, Action render)> primitives)
     {
         // Sort by draw priority (lower priority = drawn first / behind). OrderBy is stable so
         // primitives on the same layer keep their original order.
         primitives.Sort((a, b) => a.priority.CompareTo(b.priority));
-        foreach (var (_, _, render) in primitives)
+        foreach (var (_, _, _, _, render) in primitives)
             render();
     }
 
     // Same draw order as DrawSorted, but each layer's run is wrapped in a named group so a vector
     // backend can toggle it after export. GetDrawPriority is a pure function of layer, so a stable
-    // sort by (priority, layer) already clusters same-layer primitives into contiguous runs.
+    // sort by (priority, layer) already clusters same-layer primitives into contiguous runs. Each
+    // individual primitive is further wrapped in its own "p-{kind}-{index}" group — see the doc
+    // comment on RenderGroupedByLayer for why (per-primitive click targets, no server round-trip).
     private static IReadOnlyList<int> DrawGroupedByLayer(
-        IRenderContext context, List<(int layer, int priority, Action render)> primitives)
+        IRenderContext context, List<(int layer, int priority, string kind, int index, Action render)> primitives)
     {
         primitives.Sort((a, b) =>
         {
@@ -273,7 +279,9 @@ public sealed class PcbComponentRenderer
             context.BeginGroup($"layer-{layer}");
             while (i < primitives.Count && primitives[i].layer == layer)
             {
+                context.BeginGroup($"p-{primitives[i].kind}-{primitives[i].index}");
                 primitives[i].render();
+                context.EndGroup();
                 i++;
             }
             context.EndGroup();
@@ -281,35 +289,71 @@ public sealed class PcbComponentRenderer
         return layers;
     }
 
-    private void Collect(IRenderContext context, List<(int layer, int priority, Action render)> primitives,
+    private void Collect(IRenderContext context, List<(int layer, int priority, string kind, int index, Action render)> primitives,
         IEnumerable<IPcbTrack> tracks, IEnumerable<IPcbArc> arcs, IEnumerable<IPcbFill> fills,
         IEnumerable<IPcbRegion> regions, IEnumerable<IPcbText> texts, IEnumerable<IPcbPad> pads,
         IEnumerable<IPcbVia> vias, IEnumerable<IPcbComponentBody> bodies)
     {
+        // Index is the position within the component's OWN collection (component.Tracks[index], etc.),
+        // not the position among visible primitives — it must stay stable and independent of
+        // IsLayerVisible culling so the app-level reassignment endpoint can look a clicked primitive
+        // back up by (kind, index) with no extra bookkeeping.
+        int idx = 0;
         foreach (var track in tracks.Cast<PcbTrack>())
+        {
+            var i = idx++;
             if (IsLayerVisible(track.Layer))
-                primitives.Add((track.Layer, LayerColors.GetDrawPriority(track.Layer), () => RenderTrack(context, track)));
+                primitives.Add((track.Layer, LayerColors.GetDrawPriority(track.Layer), "Track", i, () => RenderTrack(context, track)));
+        }
+        idx = 0;
         foreach (var arc in arcs.Cast<PcbArc>())
+        {
+            var i = idx++;
             if (IsLayerVisible(arc.Layer))
-                primitives.Add((arc.Layer, LayerColors.GetDrawPriority(arc.Layer), () => RenderArc(context, arc)));
+                primitives.Add((arc.Layer, LayerColors.GetDrawPriority(arc.Layer), "Arc", i, () => RenderArc(context, arc)));
+        }
+        idx = 0;
         foreach (var fill in fills.Cast<PcbFill>())
+        {
+            var i = idx++;
             if (IsLayerVisible(fill.Layer))
-                primitives.Add((fill.Layer, LayerColors.GetDrawPriority(fill.Layer), () => RenderFill(context, fill)));
+                primitives.Add((fill.Layer, LayerColors.GetDrawPriority(fill.Layer), "Fill", i, () => RenderFill(context, fill)));
+        }
+        idx = 0;
         foreach (var region in regions.Cast<PcbRegion>())
+        {
+            var i = idx++;
             if (IsLayerVisible(region.Layer))
-                primitives.Add((region.Layer, LayerColors.GetDrawPriority(region.Layer), () => RenderRegion(context, region)));
+                primitives.Add((region.Layer, LayerColors.GetDrawPriority(region.Layer), "Region", i, () => RenderRegion(context, region)));
+        }
+        idx = 0;
         foreach (var text in texts.Cast<PcbText>())
+        {
+            var i = idx++;
             if (IsLayerVisible(text.Layer))
-                primitives.Add((text.Layer, LayerColors.GetDrawPriority(text.Layer), () => RenderText(context, text)));
+                primitives.Add((text.Layer, LayerColors.GetDrawPriority(text.Layer), "Text", i, () => RenderText(context, text)));
+        }
+        idx = 0;
         foreach (var pad in pads.Cast<PcbPad>())
+        {
+            var i = idx++;
             if (IsLayerVisible(pad.Layer))
-                primitives.Add((pad.Layer, LayerColors.GetDrawPriority(pad.Layer), () => RenderPad(context, pad)));
+                primitives.Add((pad.Layer, LayerColors.GetDrawPriority(pad.Layer), "Pad", i, () => RenderPad(context, pad)));
+        }
+        idx = 0;
         foreach (var via in vias.Cast<PcbVia>())
+        {
+            var i = idx++;
             if (IsLayerVisible(via.Layer))
-                primitives.Add((via.Layer, LayerColors.GetDrawPriority(via.Layer), () => RenderVia(context, via)));
+                primitives.Add((via.Layer, LayerColors.GetDrawPriority(via.Layer), "Via", i, () => RenderVia(context, via)));
+        }
+        idx = 0;
         foreach (var body in bodies.Cast<PcbComponentBody>())
+        {
+            var i = idx++;
             if (IsLayerVisible(body.Layer))
-                primitives.Add((body.Layer, LayerColors.GetDrawPriority(body.Layer), () => RenderComponentBody(context, body)));
+                primitives.Add((body.Layer, LayerColors.GetDrawPriority(body.Layer), "Body", i, () => RenderComponentBody(context, body)));
+        }
     }
 
     // ── Track ───────────────────────────────────────────────────────

@@ -66,6 +66,20 @@ public sealed class PcbLayerStack
     /// per-file table rather than assuming the defaults.
     /// Returns null if no layer stack data is present.
     /// </summary>
+    // Fixed single-purpose layers that Altium always shows regardless of the current board/library's
+    // stackup or mechanical-layer configuration — there's only ever one Top Solder, and it has no
+    // PREV/NEXT chain membership and no MECHENABLED flag to check (see the enabled-gating pass below).
+    private static readonly HashSet<int> AlwaysEnabledLayers = new()
+    {
+        1, 32,          // Top Layer, Bottom Layer
+        33, 34,         // Top/Bottom Overlay
+        35, 36,         // Top/Bottom Paste
+        37, 38,         // Top/Bottom Solder
+        55, 56,         // Drill Guide, Keep-Out Layer
+        73, 74,         // Drill Drawing, Multi-Layer
+        81, 82,         // Pad Holes, Via Holes
+    };
+
     public static PcbLayerStack? FromBoardParameters(Dictionary<string, string>? parameters)
     {
         if (parameters == null)
@@ -75,6 +89,14 @@ public sealed class PcbLayerStack
 
         // Scan for LAYER{N}NAME — the current (unprefixed) key. Some files only carry the older
         // V7_LAYER{N}NAME snapshot, so fall back to that when the current key is absent.
+        //
+        // IMPORTANT: Altium always writes a full name/property template for every possible slot here
+        // — all 30 Mid-Layers, all 16 Internal Planes, all 16 classic Mechanical layers — regardless
+        // of whether that slot is actually turned on for THIS board/library (confirmed against a
+        // 2-layer, Top/Bottom-only library that still had LAYER2NAME.."Mid-Layer 1" through
+        // LAYER31NAME.."Mid-Layer 30" fully populated). So key presence here means "this slot has a
+        // name," not "this layer exists" — the enabled-gating pass below removes whichever of these
+        // turn out to be template filler rather than real, currently-enabled layers.
         for (var i = 1; i <= 100; i++)
         {
             var hasCurrent = parameters.TryGetValue($"LAYER{i}NAME", out var name);
@@ -98,22 +120,62 @@ public sealed class PcbLayerStack
             entries[i] = entry;
         }
 
+        // Signal (Mid-Layer 2-31) and Internal Plane (39-54) slots: a slot that's actually part of
+        // this board/library's stackup is linked into the Top(1)→...→Bottom(32) PREV/NEXT chain; a
+        // disabled template slot's PREV and NEXT both stay 0 (unlinked — confirmed against the same
+        // 2-layer library: every unused Mid-Layer/Internal-Plane slot had PREV=NEXT=0, while Top and
+        // Bottom pointed straight at each other). Fixed-purpose layers (Overlay, Paste, Drill Guide,
+        // ...) have this same PREV=NEXT=0 signature despite always being enabled, so they're exempted
+        // via AlwaysEnabledLayers rather than being swept up by this check.
+        foreach (var id in entries.Keys.ToList())
+        {
+            if (AlwaysEnabledLayers.Contains(id)) continue;
+            var isStackSlot = (id >= 2 && id <= 31) || (id >= 39 && id <= 54);
+            if (!isStackSlot) continue;
+            var e = entries[id];
+            if (e.PreviousIndex == 0 && e.NextIndex == 0)
+                entries.Remove(id);
+        }
+
+        // Mechanical 1-16 (ids 57-72): the classic table above has no enabled concept at all — every
+        // mechanical slot gets a full name template the same way signal layers do. The real on/off
+        // flag only exists in the "LAYER_V8_{Y}" table scanned below, so pull it out first and drop
+        // whichever classic mechanical entries turn out to be disabled. Names/colors already read
+        // above are kept for the ones that survive (they're the same values V8 carries, but the
+        // classic table is also where a custom rename would show up if the two ever disagreed).
+        var mechanicalEnabled = new HashSet<int>();
+        for (var y = 0; y <= 200; y++)
+        {
+            if (!parameters.TryGetValue($"LAYER_V8_{y}MECHENABLED", out var enabledStr) || enabledStr != "TRUE")
+                continue;
+            if (!parameters.TryGetValue($"LAYER_V8_{y}LAYERID", out var layerIdStr) ||
+                !long.TryParse(layerIdStr, out var layerIdRaw))
+                continue;
+            var mechNum = (int)(layerIdRaw & 0xFF);
+            if (mechNum >= 1)
+                mechanicalEnabled.Add(mechNum);
+        }
+        for (var mechNum = 1; mechNum <= 16; mechNum++)
+        {
+            if (!mechanicalEnabled.Contains(mechNum))
+                entries.Remove(56 + mechNum);
+        }
+
         // Supplementary source: the "LAYER_V8_{Y}" table — the only place a custom name for a
         // Mechanical layer past 16 (id 1000+N — see PcbLibReader.MechanicalLayerId) is recorded; the
-        // classic table above has no slots past Mechanical 16.
+        // classic table above has no slots past Mechanical 16. Same enabled-by-VALUE rule as above:
+        // every mechanical slot up to at least 32 gets a V8 entry regardless of on/off state, so
+        // MECHENABLED must be checked for "TRUE", not just presence.
         //
         // Y is NOT a fixed schema position: it's specific to each file's own layer configuration and
         // does not generalize across files (confirmed empirically — the same Y means a different layer
         // in different files). Instead, each mechanical V8 slot carries its own "LAYERID" scripting
         // identifier whose LOW BYTE reliably equals the mechanical number regardless of file or Y
         // position (e.g. LAYERID=16908308 → 16908308 & 0xFF = 20 = Mechanical 20), confirmed against
-        // two independently-verified files including a live cross-check against Altium's own UI.
-        // "MECHENABLED" presence on a slot marks it as mechanical — non-mechanical V8 slots (copper,
-        // overlay, ...) also have a LAYERID, but its low byte means nothing for our purposes and must
-        // not be used. Only fills gaps the classic table left; never overrides it.
+        // three independently-verified files including a live cross-check against Altium's own UI.
         for (var y = 0; y <= 200; y++)
         {
-            if (!parameters.ContainsKey($"LAYER_V8_{y}MECHENABLED"))
+            if (!parameters.TryGetValue($"LAYER_V8_{y}MECHENABLED", out var enabledStr) || enabledStr != "TRUE")
                 continue;
             if (!parameters.TryGetValue($"LAYER_V8_{y}NAME", out var v8Name))
                 continue;
