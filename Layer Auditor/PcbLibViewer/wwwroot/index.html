@@ -168,7 +168,13 @@ aside.report{border-right:none; border-left:1px solid var(--line)}
   font-family:inherit; font-size:11.5px; padding:8px 10px; outline:none;
 }
 #selPrimSec select:focus{border-color:var(--copper-deep)}
-#selPrimSec .hint{font-size:10px; color:var(--ink-faint); line-height:1.5; margin-top:9px}
+.hint{font-size:10px; color:var(--ink-faint); line-height:1.5; margin-top:9px}
+
+/* Generate Drawings */
+#genDrawingsSec .btn{width:100%}
+#genDrawingsSec .btn + .btn{margin-top:8px}
+.check-row{display:flex; align-items:center; gap:7px; margin:9px 0; font-size:11px; color:var(--ink-dim); cursor:pointer; user-select:none}
+.check-row input{accent-color:var(--copper)}
 #spAssignBtn{margin-top:10px; width:100%}
 
 #genReportBtn{margin-top:12px; width:100%}
@@ -281,6 +287,27 @@ body.dragging .drop .ring{border-color:var(--copper); box-shadow:0 0 40px rgba(2
         </div>
       </div>
 
+      <div class="sec" id="genDrawingsSec">
+        <h2>Generate Drawings</h2>
+        <button class="btn" id="genCourtyardBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>
+          Generate Courtyard
+        </button>
+        <button class="btn" id="genAssemblyBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"/><path d="M3 9h18"/></svg>
+          Generate Assembly Outline
+        </button>
+        <label class="check-row">
+          <input type="checkbox" id="genIncludeDesignator" checked>
+          Include .Designator text
+        </label>
+        <button class="btn" id="genPin1Btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/></svg>
+          Generate Pin-1 Indicator
+        </button>
+        <div class="hint">Fills in missing documentation from the part's own geometry (3D body outline, pad extents) — courtyard and assembly outline each replace whatever's currently on their layer; pin-1 only adds a ring, it doesn't clear anything.</div>
+      </div>
+
       <div class="sec" id="selPrimSec" style="display:none">
         <h2>Selected Primitive</h2>
         <div class="readout" style="margin-bottom:10px">
@@ -390,6 +417,9 @@ $('#downloadReportBtn').onclick = downloadReport;
 $('#applyReassignBtn').onclick = applyReassignments;
 $('#exportLibBtn').onclick = exportLibrary;
 $('#spAssignBtn').onclick = assignSelectedPrim;
+$('#genCourtyardBtn').onclick = ()=>generateDrawing('courtyard');
+$('#genAssemblyBtn').onclick = ()=>generateDrawing('assembly');
+$('#genPin1Btn').onclick = ()=>generateDrawing('pin1');
 window.addEventListener('keydown', e=>{
   if(e.key==='Escape'){ clearPrimSelection(); return; }
   if(e.key==='Tab' && state.selPrims.length && !['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)){
@@ -756,6 +786,27 @@ async function exportLibrary(){
     const blob=await res.blob();
     download(blob, `${state.name||'library'}-edited.PcbLib`);
     toast('Exported modified library');
+  }catch(err){ toast(err.message); }
+  finally{ setStatus('on', state.name||''); }
+}
+
+// ── Generate Drawings ──────────────────────────────────
+// Courtyard/assembly/pin-1 generation from the footprint's own geometry (3D body outline, pad
+// extents) — for footprints missing this documentation outright, not just using the wrong layer for
+// it (that case is what the content-warning badges + reassignment dropdowns above are for). Courtyard
+// and assembly each replace whatever's currently on their target layer; pin-1 only adds a ring.
+const GEN_ENDPOINTS = { courtyard:'/api/generate/courtyard', assembly:'/api/generate/assembly', pin1:'/api/generate/pin1' };
+async function generateDrawing(kind){
+  if(!state.id || state.selected<0) return;
+  setStatus('busy','generating…');
+  try{
+    const body = {id:state.id, index:state.selected};
+    if(kind==='assembly') body.includeDesignator = $('#genIncludeDesignator').checked;
+    const res=await fetch(GEN_ENDPOINTS[kind],{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error||'generate failed'); }
+    const data=await res.json();
+    toast(data.message);
+    if(data.ok) await render();
   }catch(err){ toast(err.message); }
   finally{ setStatus('on', state.name||''); }
 }

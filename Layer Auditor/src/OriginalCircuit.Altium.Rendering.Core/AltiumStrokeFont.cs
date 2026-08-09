@@ -8,10 +8,10 @@ namespace OriginalCircuit.Altium.Rendering;
 /// text height is 1.0, the baseline is at y=0, and glyphs grow in +x (right) and +y (up).
 /// Callers scale by the desired height and map into screen space.
 /// </summary>
-internal static class AltiumStrokeFont
+public static class AltiumStrokeFont
 {
     /// <summary>Altium stroke font styles (PCB TEXT <c>stroke_font_type</c>: 1=Default, 2=Sans, 3=Serif).</summary>
-    internal enum Style
+    public enum Style
     {
         /// <summary>Default Altium stroke font.</summary>
         Default,
@@ -29,10 +29,10 @@ internal static class AltiumStrokeFont
     private const float SansSerifCharSpacing = 0.2060f;
 
     /// <summary>A single stroke segment in normalized units (height = 1.0, baseline y=0, +y up).</summary>
-    internal readonly record struct Segment(float X1, float Y1, float X2, float Y2);
+    public readonly record struct Segment(float X1, float Y1, float X2, float Y2);
 
     /// <summary>Maps a <see cref="PcbStrokeFont"/> to the corresponding stroke style.</summary>
-    internal static Style FromStrokeFont(PcbStrokeFont font) => font switch
+    public static Style FromStrokeFont(PcbStrokeFont font) => font switch
     {
         PcbStrokeFont.SansSerif => Style.SansSerif,
         PcbStrokeFont.Serif => Style.Serif,
@@ -42,8 +42,11 @@ internal static class AltiumStrokeFont
     /// <summary>
     /// Lays out <paramref name="text"/> into normalized stroke segments. <paramref name="advanceWidth"/>
     /// receives the widest line's total advance (normalized units), for justification/measurement.
+    /// Public (not just an SVG-rendering detail) since callers that need to size text to fit a target
+    /// box — e.g. generating a centered ".Designator" string sized to fit a component body's bounds —
+    /// need the same measurement the renderer uses, not a re-approximation.
     /// </summary>
-    internal static List<Segment> Layout(string text, Style style, out float advanceWidth)
+    public static List<Segment> Layout(string text, Style style, out float advanceWidth)
     {
         var segments = new List<Segment>();
         advanceWidth = 0f;

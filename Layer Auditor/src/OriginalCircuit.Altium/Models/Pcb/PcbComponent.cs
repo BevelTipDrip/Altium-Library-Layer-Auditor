@@ -503,6 +503,32 @@ public sealed class PcbComponent : IPcbComponent
     /// </summary>
     public void AddComponentBody(PcbComponentBody body) => _componentBodies.Add(body);
 
+    /// <summary>
+    /// Removes a fill from the component.
+    /// </summary>
+    public bool RemoveFill(PcbFill fill) => _fills.Remove(fill);
+
+    /// <summary>
+    /// Removes a component body from the component.
+    /// </summary>
+    public bool RemoveComponentBody(PcbComponentBody body) => _componentBodies.Remove(body);
+
+    // Concrete-typed counterparts to the IPcbComponent explicit-interface Remove* methods below (which
+    // take the interface type and so aren't callable through a plain PcbComponent reference) — mirrors
+    // the concrete-typed Add* methods above, for callers that already have a PcbComponent in hand.
+    /// <summary>Removes a pad from the component.</summary>
+    public bool RemovePad(PcbPad pad) => _pads.Remove(pad);
+    /// <summary>Removes a track from the component.</summary>
+    public bool RemoveTrack(PcbTrack track) => _tracks.Remove(track);
+    /// <summary>Removes a via from the component.</summary>
+    public bool RemoveVia(PcbVia via) => _vias.Remove(via);
+    /// <summary>Removes an arc from the component.</summary>
+    public bool RemoveArc(PcbArc arc) => _arcs.Remove(arc);
+    /// <summary>Removes text from the component.</summary>
+    public bool RemoveText(PcbText text) => _texts.Remove(text);
+    /// <summary>Removes a region from the component.</summary>
+    public bool RemoveRegion(PcbRegion region) => _regions.Remove(region);
+
     // Explicit interface implementations for IPcbComponent
     void IPcbComponent.AddPad(IPcbPad pad)
     {

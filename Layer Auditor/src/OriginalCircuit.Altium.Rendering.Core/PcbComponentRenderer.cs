@@ -657,35 +657,64 @@ public sealed class PcbComponentRenderer
         if (text.TextKind == PcbTextKind.Stroke && !text.IsTrueType)
         {
             var segments = AltiumStrokeFont.Layout(
-                text.Text, AltiumStrokeFont.FromStrokeFont(text.StrokeFont), out _);
+                text.Text, AltiumStrokeFont.FromStrokeFont(text.StrokeFont), out var advanceWidth);
             if (segments.Count == 0) return;
 
             var strokeWidth = _transform.ScaleValue(text.StrokeWidth);
             if (strokeWidth < 1) strokeWidth = 1;
 
-            // Non-frame Altium text always anchors bottom-left at (X,Y) regardless of justification.
+            // text.InvertedRectJustification is Altium's general text-anchor bias (see its updated doc
+            // comment) — it applies to plain text exactly as much as inverted-rectangle text, confirmed
+            // against an 8-component user-supplied ground-truth library covering all 9 justification
+            // values. (X,Y) is only the true bottom-left corner for LeftBottom (fracX=0, fracY=0); every
+            // other value needs the glyph block shifted by that fraction of its own measured size before
+            // the existing bottom-left-anchored draw logic applies, using the SAME advanceWidth the font
+            // layout already measured (0 shift is a no-op, preserving prior behavior exactly).
+            //
+            // IsJustificationValid gates this: every real, Altium-authored text record in that same
+            // ground-truth library had it set to true regardless of which justification it used, and
+            // separately, our own generator originally forgot to set it — producing exactly this bug's
+            // symptom (text saved with correct CenterCenter justification still rendering bottom-left-
+            // anchored in real Altium). Altium apparently ignores InvertedRectJustification entirely
+            // when this is false, so mirror that here rather than trusting the value regardless.
+            var (fracX, fracY) = text.IsJustificationValid
+                ? JustificationFractions(text.InvertedRectJustification)
+                : (0.0, 0.0);
+            var offsetXNorm = fracX * advanceWidth;
+            var offsetYNorm = fracY; // glyph nominal height is exactly 1.0 normalized unit
+
             context.SaveState();
             context.Translate(x, y);
             if (text.Rotation != 0) context.Rotate(-text.Rotation);
             if (text.IsMirrored) context.Scale(-1, 1);
 
-            // Glyph space is Y-up; screen Y is down, so negate Y.
+            // Glyph space is Y-up; screen Y is down, so negate Y (after applying the anchor shift, still
+            // in normalized glyph space).
             foreach (var s in segments)
-                context.DrawLine(s.X1 * height, -s.Y1 * height, s.X2 * height, -s.Y2 * height, color, strokeWidth);
+                context.DrawLine(
+                    (s.X1 - offsetXNorm) * height, -(s.Y1 - offsetYNorm) * height,
+                    (s.X2 - offsetXNorm) * height, -(s.Y2 - offsetYNorm) * height,
+                    color, strokeWidth);
 
             context.RestoreState();
             return;
         }
 
-        // TrueType / barcode: render the named system font, scaled to the text height.
+        // TrueType / barcode: render the named system font, scaled to the text height. Justification
+        // maps directly onto the render context's own alignment options — no manual offset math needed
+        // here, unlike the stroke-font path above (which draws raw line segments itself). Same
+        // IsJustificationValid gating as the stroke path above.
         double fontSize = height;
+        var (hAlign, vAlign) = text.IsJustificationValid
+            ? TrueTypeAlignment(text.InvertedRectJustification)
+            : (TextHAlign.Left, TextVAlign.Baseline);
         var options = new TextRenderOptions
         {
             FontFamily = text.FontName ?? "Arial",
             Bold = text.FontBold,
             Italic = text.FontItalic,
-            HorizontalAlignment = TextHAlign.Left,
-            VerticalAlignment = TextVAlign.Baseline
+            HorizontalAlignment = hAlign,
+            VerticalAlignment = vAlign
         };
 
         bool needsTransform = text.Rotation != 0 || text.IsMirrored;
@@ -703,6 +732,40 @@ public sealed class PcbComponentRenderer
             context.DrawText(text.Text, x, y, fontSize, color, options);
         }
     }
+
+    // (horizontal, vertical) anchor fraction within the text's own measured box, per Altium's
+    // TTextAutoposition-equivalent justification: 0 = the box's own left/bottom edge sits at Location
+    // (the classic default), 0.5 = Location is the box's center, 1 = Location is the right/top edge.
+    // Manual (0, unset) has no reliable anchor info, so it's treated the same as the classic default.
+    private static (double FracX, double FracY) JustificationFractions(PcbTextJustification j) => j switch
+    {
+        PcbTextJustification.LeftTop => (0, 1),
+        PcbTextJustification.LeftCenter => (0, 0.5),
+        PcbTextJustification.LeftBottom => (0, 0),
+        PcbTextJustification.CenterTop => (0.5, 1),
+        PcbTextJustification.CenterCenter => (0.5, 0.5),
+        PcbTextJustification.CenterBottom => (0.5, 0),
+        PcbTextJustification.RightTop => (1, 1),
+        PcbTextJustification.RightCenter => (1, 0.5),
+        PcbTextJustification.RightBottom => (1, 0),
+        _ => (0, 0),
+    };
+
+    // Same anchor semantics as JustificationFractions, expressed as the render context's own text
+    // alignment enums for the TrueType path (Baseline maps to the "bottom" tier — Altium's vertical
+    // bottom anchor for text is the baseline, matching the stroke-font path's fracY=0 case exactly).
+    private static (TextHAlign H, TextVAlign V) TrueTypeAlignment(PcbTextJustification j) => j switch
+    {
+        PcbTextJustification.LeftTop => (TextHAlign.Left, TextVAlign.Top),
+        PcbTextJustification.LeftCenter => (TextHAlign.Left, TextVAlign.Middle),
+        PcbTextJustification.CenterTop => (TextHAlign.Center, TextVAlign.Top),
+        PcbTextJustification.CenterCenter => (TextHAlign.Center, TextVAlign.Middle),
+        PcbTextJustification.CenterBottom => (TextHAlign.Center, TextVAlign.Baseline),
+        PcbTextJustification.RightTop => (TextHAlign.Right, TextVAlign.Top),
+        PcbTextJustification.RightCenter => (TextHAlign.Right, TextVAlign.Middle),
+        PcbTextJustification.RightBottom => (TextHAlign.Right, TextVAlign.Baseline),
+        _ => (TextHAlign.Left, TextVAlign.Baseline), // LeftBottom and Manual/unset
+    };
 
     // Fills a set of world-space quads (e.g. Data Matrix dark modules) in a single colour.
     private void FillWorldQuads(IRenderContext context, IReadOnlyList<CoordPoint[]> quads, uint color)

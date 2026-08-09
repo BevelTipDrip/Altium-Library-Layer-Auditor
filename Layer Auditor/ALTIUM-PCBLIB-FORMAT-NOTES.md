@@ -60,7 +60,7 @@ dropped anything higher).
 
 - Read: `PcbLibReader.ResolveExtendedMechanicalLayer` (`src/OriginalCircuit.Altium/Serialization/Readers/PcbLibReader.cs:947`)
 - Write (legacy byte from the text): `PcbLibWriter.LayerNameToByte`
-- Write (canonical text from a numeric layer): `PcbDocWriter.LayerByteToName` (`src/OriginalCircuit.Altium/Serialization/Writers/PcbDocWriter.cs:1142`, made `public` since callers reassigning a Region/ComponentBody's layer must also update this text field — see §7)
+- Write (canonical text from a numeric layer): `PcbDocWriter.LayerByteToName` (`src/OriginalCircuit.Altium/Serialization/Writers/PcbDocWriter.cs:1142`, made `public` since callers reassigning a Region/ComponentBody's layer must also update this text field — see §8)
 
 ### Everything else (Track, Arc, Fill, Text, ...): a hidden second byte
 
@@ -276,7 +276,107 @@ Layer 1 vs Layer 32, or `HoleSize > 0` for through-hole) is the primary mount-si
 signal; body Z-extent is only consulted as a fallback (no pads at all) or as this
 mid-mount override.
 
-## 7. The "SmartUnion" trap — reassignment's biggest gotcha
+## 7. `PcbText` justification — offset 132 applies to ALL text, not just inverted-rect frames
+
+**Symptom**: our own generated ".Designator" text was positioned by manually
+computing a bottom-left corner sized for the literal placeholder string's width —
+which meant once Altium later substitutes a real, shorter designator (e.g. "R1"),
+it renders visibly off-center instead of staying centered, since Altium computes
+its own anchor from `Location` + `Justification`, not from a one-off manual offset
+baked in at generation time.
+
+**Root cause**: `PcbText.InvertedRectJustification` (byte offset 132 in the binary
+text record) was assumed — by name and by the code that only consulted it inside
+`RenderInvertedText` — to matter exclusively when `UseInvertedRectangle` is set.
+It doesn't; it's the general anchor/justification for every text object. `Location`
+is only the true bottom-left corner when this is `LeftBottom` (or unset/`Manual`);
+for any other value (e.g. `CenterCenter`), `Location` is that other point in the
+text's own box, and the rendered glyphs are meant to grow from it accordingly —
+which is exactly why a center-justified special string stays centered regardless of
+what string it resolves to, while a bottom-left-justified one grows only right/up
+from a fixed corner.
+
+**Confirmed** against a user-supplied test library (`text justification test.PcbLib`)
+with two single-character ("1") text objects, same height, same font, same
+intended visual position, differing only in Altium's "Justification" UI setting —
+raw byte 132 was `5` (`CenterCenter`) on one and `3` (`LeftBottom`) on the other,
+exactly matching the pre-existing `PcbTextJustification` enum (already documented
+as matching Altium's `TTextAutoposition` encoding, but until now only wired up for
+the inverted-rect case). The writer (`PcbLibWriter.cs`) already wrote this byte
+unconditionally regardless of frame state, so no write-side fix was needed — only
+read-side *interpretation* (the renderer) and the model's own `PcbText.Bounds` were
+wrong.
+
+**Fix**:
+- `PcbComponentRenderer.RenderText` (stroke-font path): shifts the drawn glyph
+  segments by `(fracX * advanceWidth, fracY)` in normalized glyph space before the
+  existing bottom-left-anchored draw logic — `fracX`/`fracY` ∈ {0, 0.5, 1} per the
+  9-way justification enum, using the SAME `advanceWidth` `AltiumStrokeFont.Layout`
+  already measures. A 0 shift (the `LeftBottom`/`Manual` case) is a no-op,
+  preserving all prior rendering exactly.
+- `RenderText` (TrueType path): maps justification directly onto the render
+  context's own `TextHAlign`/`TextVAlign` options instead of hardcoding Left/Baseline.
+- `PcbText.Bounds`: was computing the box from `Location` assuming bottom-left
+  anchor unconditionally — same bug, one level up, and it feeds `PcbComponent.Bounds`
+  → `AutoZoom` framing. Fixed with the equivalent offset-before-rotate logic.
+- Our own generator (`Program.cs`'s `AddDesignatorText`): now sets
+  `Location = bbox.Center` and `InvertedRectJustification = CenterCenter` directly,
+  instead of manually computing a bottom-left corner sized for the placeholder
+  string — the whole point being that Altium keeps it centered itself once the
+  string resolves to something else.
+
+**Known related gap, not fixed** (out of scope — a different renderer this app
+doesn't use): `PcbRealisticRenderer.cs:643` reads `text.Justification` (note: NOT
+`InvertedRectJustification` — a second, differently-typed, differently-named
+property on `PcbText` that the reader never populates from any offset, always
+defaulting to `TextJustification.BottomLeft`). That property is unrelated to this
+fix and still dead; if `PcbRealisticRenderer` (board-level fab-style rendering) is
+ever brought into this app, it has the same underlying justification bug and needs
+the same treatment, reading from `InvertedRectJustification` instead.
+
+### 7a. Follow-up: the fix above was necessary but not sufficient — `IsJustificationValid`
+
+The above fix made our own SVG preview honor justification correctly, but a
+user-generated designator string **still opened in real Altium bottom-left
+anchored** despite carrying the correct `CenterCenter` byte. The two-record test
+above didn't catch this because it happened to not isolate the actual missing
+piece.
+
+**Root cause**: `PcbText.IsJustificationValid` — a *separate* boolean at byte
+offset 240, already modeled and already round-tripped correctly (`PcbLibReader.cs:1507`/`:1565`,
+`PcbLibWriter.cs:1082`) — gates whether Altium honors
+`InvertedRectJustification` **at all**. Our generator (`AddDesignatorText`) set
+`InvertedRectJustification = CenterCenter` but never set this flag, so it defaulted
+to `false`; Altium silently ignores the justification byte whenever this is false
+and falls back to plain bottom-left anchoring, regardless of what
+`InvertedRectJustification` says.
+
+**Confirmed** against a second, much richer user-supplied ground-truth library
+(`text justification test 2.PcbLib`, 8 components, one per combination of the 3×3
+horizontal/vertical justification grid, all authored live in Altium): every single
+one had byte 240 = `1`, independent of which of the 9 justification values it used.
+That library also gave a clean independent re-confirmation of the byte-132 mapping
+itself — the 8 components' byte-132 values were exactly
+`[5,3,1,6,4,2,8,5]`, matching `[CenterCenter, LeftBottom, LeftTop, CenterBottom,
+CenterTop, LeftCenter, RightCenter, CenterCenter]` against their labeled
+justifications one-for-one (component 8 repeats component 1's `CenterCenter` at a
+different `Location`, a built-in consistency check).
+
+**Fix**: `AddDesignatorText` now also sets `text.IsJustificationValid = true`.
+`PcbComponentRenderer.RenderText` (both stroke and TrueType paths) and
+`PcbText.Bounds` now all gate their justification handling on this flag too —
+falling back to plain bottom-left behavior when it's false, matching what real
+Altium does, rather than trusting `InvertedRectJustification` unconditionally.
+Verified with a full round trip: generate → export → re-import through this app's
+own reader, confirming both `InvertedRectJustification=CenterCenter` and
+`IsJustificationValid=true` survive intact.
+
+**Lesson for next time**: when a "should be enough" fix doesn't hold up against a
+second, richer ground-truth test, look for a companion *enable* flag before
+assuming the primary field's encoding itself is wrong — Altium's binary format has
+already shown this pattern once before (`LAYER_V8_{Y}MECHENABLED`, §4).
+
+## 8. The "SmartUnion" trap — reassignment's biggest gotcha
 
 This one cost the most debugging time and is the easiest to reintroduce if this
 code is touched again without reading this section.
@@ -322,7 +422,7 @@ been tested. If a future reassignment silently fails to show up in Altium despit
 looking correct in our own reader, **check `AdditionalParameters` for any embedded
 layer reference first** — this is the pattern to look for.
 
-## 8. Testing methodology that worked well
+## 9. Testing methodology that worked well
 
 For anyone extending this further:
 

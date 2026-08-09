@@ -170,9 +170,21 @@ public sealed class PcbText : IPcbText
     public Coord InvertedRectHeight { get; set; }
 
     /// <summary>
-    /// Justification / anchor of the text within its frame (the "inverted rectangle"). Uses the
-    /// Altium PCB encoding (<see cref="PcbTextJustification"/>), which differs from the schematic
-    /// <c>TextJustification</c> ordering.
+    /// Justification / anchor point of this text relative to <see cref="Location"/> — despite the name
+    /// (kept for compatibility with the byte's original, narrower assumed purpose), this applies to
+    /// EVERY text object, not just ones with <see cref="UseInvertedRectangle"/> set. <see cref="Location"/>
+    /// is the text's bottom-left corner only when this is <see cref="PcbTextJustification.LeftBottom"/>
+    /// (or <see cref="PcbTextJustification.Manual"/>/unset); any other value means Location is some other
+    /// point in the text's own box (e.g. <see cref="PcbTextJustification.CenterCenter"/> means Location
+    /// IS the center, so the rendered text grows symmetrically outward from it regardless of string
+    /// length — important for a special string like ".Designator" that gets substituted with a
+    /// variable-length value later). Confirmed against a user-supplied test library: two text objects
+    /// with identical Height/font but different Justification (5=CenterCenter, 3=LeftBottom) stored
+    /// different Location values for the same intended visual position, with the delta matching the
+    /// glyph block's own measured half-width/half-height. Uses the Altium PCB encoding
+    /// (<see cref="PcbTextJustification"/>), which differs from the schematic <c>TextJustification</c>
+    /// ordering. Read/written unconditionally at offset 132 (see <c>PcbLibReader.ReadText</c> /
+    /// <c>PcbLibWriter</c>), not gated behind <see cref="UseInvertedRectangle"/>.
     /// </summary>
     public PcbTextJustification InvertedRectJustification { get; set; }
 
@@ -666,22 +678,52 @@ public sealed class PcbText : IPcbText
         {
             // Approximate text extent based on height and text length.
             var estimatedWidth = Height * Text.Length * 0.6; // rough estimate
-            if (Rotation == 0 && !Mirrored)
-                return new CoordRect(Location.X, Location.Y, Location.X + estimatedWidth, Location.Y + Height);
 
-            // Axis-aligned bounding box of the rotated (and possibly mirrored) text box anchored at
-            // Location. Without this, rotated silkscreen designators (commonly at 90/270 deg) report a
-            // too-small extent and get clipped by AutoZoom framing.
+            // Location is the box's bottom-left corner only for LeftBottom/Manual justification, OR
+            // when IsJustificationValid is false — Altium ignores InvertedRectJustification entirely
+            // in that case (confirmed: every real, Altium-authored text record in an 8-component
+            // ground-truth library had this flag set regardless of justification; a generated text
+            // that sets InvertedRectJustification without also setting this flag renders bottom-left
+            // anchored in real Altium no matter what justification value it carries). Any other,
+            // valid, non-default value means Location sits somewhere else in the box, so the box's own
+            // bottom-left corner has to be found by walking back from Location by that same fraction
+            // of the (unrotated) box size, before rotating.
+            var (fracX, fracY) = IsJustificationValid ? InvertedRectJustification switch
+            {
+                PcbTextJustification.LeftTop => (0.0, 1.0),
+                PcbTextJustification.LeftCenter => (0.0, 0.5),
+                PcbTextJustification.CenterTop => (0.5, 1.0),
+                PcbTextJustification.CenterCenter => (0.5, 0.5),
+                PcbTextJustification.CenterBottom => (0.5, 0.0),
+                PcbTextJustification.RightTop => (1.0, 1.0),
+                PcbTextJustification.RightCenter => (1.0, 0.5),
+                PcbTextJustification.RightBottom => (1.0, 0.0),
+                _ => (0.0, 0.0), // LeftBottom, Manual/unset
+            } : (0.0, 0.0);
+            var originX = Location.X - estimatedWidth * fracX;
+            var originY = Location.Y - Height * fracY;
+
+            if (Rotation == 0 && !Mirrored)
+                return new CoordRect(originX, originY, originX + estimatedWidth, originY + Height);
+
+            // Axis-aligned bounding box of the rotated (and possibly mirrored) text box, rotated about
+            // Location (matching how the renderer transforms: translate to Location, then rotate) —
+            // NOT about the box's own corner, so the pre-rotation corners are expressed relative to
+            // Location using the same justification offset. Without this, rotated silkscreen
+            // designators (commonly at 90/270 deg) report a too-small extent and get clipped by
+            // AutoZoom framing.
             var rad = Rotation * System.Math.PI / 180.0;
             var cos = System.Math.Cos(rad);
             var sin = System.Math.Sin(rad);
             var w = (Mirrored ? -estimatedWidth.ToRaw() : estimatedWidth.ToRaw());
             var h = Height.ToRaw();
+            var offX = (int)System.Math.Round(w * fracX);
+            var offY = (int)System.Math.Round(h * fracY);
             int minX = 0, minY = 0, maxX = 0, maxY = 0;
             foreach (var (cx, cy) in new[] { (0, 0), (w, 0), (w, h), (0, h) })
             {
-                var rx = (int)System.Math.Round(cx * cos - cy * sin);
-                var ry = (int)System.Math.Round(cx * sin + cy * cos);
+                var rx = (int)System.Math.Round((cx - offX) * cos - (cy - offY) * sin);
+                var ry = (int)System.Math.Round((cx - offX) * sin + (cy - offY) * cos);
                 minX = System.Math.Min(minX, rx); maxX = System.Math.Max(maxX, rx);
                 minY = System.Math.Min(minY, ry); maxY = System.Math.Max(maxY, ry);
             }

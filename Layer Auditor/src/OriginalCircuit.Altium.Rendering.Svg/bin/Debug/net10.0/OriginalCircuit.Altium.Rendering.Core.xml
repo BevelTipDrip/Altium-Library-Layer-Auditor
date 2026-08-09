@@ -37,6 +37,9 @@
             <summary>
             Lays out <paramref name="text"/> into normalized stroke segments. <paramref name="advanceWidth"/>
             receives the widest line's total advance (normalized units), for justification/measurement.
+            Public (not just an SVG-rendering detail) since callers that need to size text to fit a target
+            box — e.g. generating a centered ".Designator" string sized to fit a component body's bounds —
+            need the same measurement the renderer uses, not a re-approximation.
             </summary>
         </member>
         <member name="M:OriginalCircuit.Altium.Rendering.AltiumStrokeFont.MeasureWidth(System.String,OriginalCircuit.Altium.Rendering.AltiumStrokeFont.Style)">

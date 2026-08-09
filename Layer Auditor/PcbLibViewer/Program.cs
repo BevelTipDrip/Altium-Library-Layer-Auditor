@@ -26,6 +26,7 @@ using OriginalCircuit.Altium.Models.Pcb;
 using OriginalCircuit.Altium.Rendering;
 using OriginalCircuit.Altium.Rendering.Svg;
 using OriginalCircuit.Altium.Serialization.Writers;
+using OriginalCircuit.Eda.Enums;
 using OriginalCircuit.Eda.Primitives;
 using OriginalCircuit.Eda.Rendering;
 
@@ -304,6 +305,53 @@ app.MapPost("/api/reassign-many", (ReassignManyRequest req, LibraryCache cache) 
     var moved = req.Prims.Count(p => ReassignOne(component, p.PrimKind, p.PrimIndex, req.ToLayer));
 
     return Results.Json(new { moved, total = req.Prims.Count });
+});
+
+// ── Generate Courtyard: for footprints missing this documentation outright (not just using the wrong
+// layer for it — see ContentWarnings for that case). Draws a boxy keepout outline — the union of the
+// 3D body's and every pad's extents, each expanded 0.15mm, unioned and traced with straight
+// horizontal/vertical segments only — onto the footprint's mount-side Courtyard layer, replacing
+// whatever was there before.
+app.MapPost("/api/generate/courtyard", (GenerateRequest req, LibraryCache cache) =>
+{
+    var entry = cache.Get(req.Id);
+    if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
+    var (_, components, layerNames, _) = entry.Value;
+    if (req.Index < 0 || req.Index >= components.Count)
+        return Results.BadRequest(new { error = "Footprint index out of range." });
+
+    var (ok, message) = GenerateCourtyard(components[req.Index], layerNames);
+    return Results.Json(new { ok, message });
+});
+
+// ── Generate Assembly Outline: traces the 3D body's own outline (or, when there's no body at all, a
+// boxy union of the pad extents instead) onto the footprint's mount-side Assembly layer, replacing
+// whatever was there. Optionally adds a centered ".Designator" special string sized to fit inside it.
+app.MapPost("/api/generate/assembly", (GenerateAssemblyRequest req, LibraryCache cache) =>
+{
+    var entry = cache.Get(req.Id);
+    if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
+    var (_, components, layerNames, _) = entry.Value;
+    if (req.Index < 0 || req.Index >= components.Count)
+        return Results.BadRequest(new { error = "Footprint index out of range." });
+
+    var (ok, message) = GenerateAssembly(components[req.Index], layerNames, req.IncludeDesignator);
+    return Results.Json(new { ok, message });
+});
+
+// ── Generate Pin-1 Indicator: adds a ring around pin 1's pad to the mount-side Assembly layer.
+// Deliberately its own action, separate from the outline above (not every footprint needs one, and
+// it doesn't clear the layer first — it's meant to be added onto an outline, not replace one).
+app.MapPost("/api/generate/pin1", (GenerateRequest req, LibraryCache cache) =>
+{
+    var entry = cache.Get(req.Id);
+    if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
+    var (_, components, layerNames, _) = entry.Value;
+    if (req.Index < 0 || req.Index >= components.Count)
+        return Results.BadRequest(new { error = "Footprint index out of range." });
+
+    var (ok, message) = GeneratePin1Indicator(components[req.Index], layerNames);
+    return Results.Json(new { ok, message });
 });
 
 // ── Export: serialize the current (possibly reassigned) in-memory library back to a .PcbLib ──────
@@ -616,6 +664,332 @@ static string? MountSide(PcbComponent c, int? topBody, int? bottomBody)
     return null;
 }
 
+// ── Courtyard / assembly-outline / pin-1 generation ─────────────────────────────────────────────
+// For footprints missing this documentation outright, as opposed to ContentWarnings above which
+// catches it existing but on the wrong layer. All three actions target whichever named layer matches
+// MountSide's guess ("bottom" only when the evidence is unambiguous; "top" for "top", "both", or
+// unknown — a courtyard/assembly still has to go somewhere, and top is the default authoring side).
+
+// mm constants rather than pre-built Coord values: top-level-statement files can't hold static
+// readonly fields for a static local function to capture (static locals capture nothing at all), and
+// Coord.FromMm is cheap enough to just call at each use site.
+const double CourtyardClearanceMm = 0.15;  // keepout margin outside body/pads
+const double DrawingLineWidthMm = 0.1;     // assembly + courtyard track/ring width
+const double Pin1EdgeMarginMm = 0.1;       // gap kept between the ring and the pad's own edge
+const double DesignatorStrokeRatio = 3.0 / 20.0;  // height:stroke-width = 20:3
+const double DesignatorFitMargin = 0.92;   // small margin so text doesn't touch the edges
+const double DesignatorTargetChars = 4;    // size for ~4 characters across the X extent — the
+                                            // ".Designator" placeholder is longer and is expected to
+                                            // overflow X; a real resolved designator (R1, C23, ...) won't
+const double DesignatorMaxHeightMils = 40; // hard cap regardless of how much Y-room is available
+
+static int? TargetLayer(Dictionary<string, int> byName, string? side, string topName, string bottomName) =>
+    byName.TryGetValue(side == "bottom" ? bottomName : topName, out var id) ? id : null;
+
+static (bool Ok, string Message) GenerateCourtyard(PcbComponent c, Dictionary<int, string> layerNames)
+{
+    var byName = LayersByName(layerNames);
+    var side = MountSide(c,
+        byName.TryGetValue("Top 3D Body", out var tb) ? tb : null,
+        byName.TryGetValue("Bottom 3D Body", out var bb) ? bb : null);
+    var targetName = side == "bottom" ? "Bottom Courtyard" : "Top Courtyard";
+    var targetId = TargetLayer(byName, side, "Top Courtyard", "Bottom Courtyard");
+    if (targetId is null)
+        return (false, $"This library doesn't define a '{targetName}' layer — nothing to generate onto.");
+
+    var clearance = Coord.FromMm(CourtyardClearanceMm);
+    var bodies = c.ComponentBodies.Cast<PcbComponentBody>().Where(b => !b.Bounds.IsEmpty).ToList();
+    var padRects = c.Pads.Cast<PcbPad>().Where(p => !p.Bounds.IsEmpty).Select(p => p.Bounds).ToList();
+
+    if (bodies.Count == 0 && padRects.Count == 0)
+        return (false, "Nothing to base a courtyard on — this footprint has no 3D body and no pads.");
+
+    List<List<CoordPoint>> loops;
+    if (bodies.Count > 0)
+    {
+        // A body is real ground truth for the part's shape, so the courtyard is allowed to roughly
+        // follow it (and the pads) rather than reduce everything to one rectangle.
+        var rects = new List<CoordRect>();
+        foreach (var b in bodies) rects.Add(b.Bounds.Inflate(clearance));
+        foreach (var r in padRects) rects.Add(r.Inflate(clearance));
+        loops = BoxyUnionOutline(rects);
+    }
+    else
+    {
+        // No body: pads are the only evidence, and a boxy union of individually-inflated pad rects can
+        // come out disjointed (e.g. a 2-pad passive with a gap between pads) — one continuous box
+        // around the outermost pads is what was actually asked for here.
+        loops = SingleBoxOutline(CoordRect.Union(padRects).Inflate(clearance));
+    }
+    if (loops.Count == 0)
+        return (false, "Could not compute a courtyard outline.");
+
+    var cleared = ClearLayer(c, targetId.Value);
+    var lineWidth = Coord.FromMm(DrawingLineWidthMm);
+    var segCount = loops.Sum(loop => DrawClosedLoop(c, loop, targetId.Value, lineWidth));
+
+    return (true, $"Generated {targetName}: {segCount} segment(s) across {loops.Count} outline(s), replacing {cleared} old item(s).");
+}
+
+static (bool Ok, string Message) GenerateAssembly(PcbComponent c, Dictionary<int, string> layerNames, bool includeDesignator)
+{
+    var byName = LayersByName(layerNames);
+    var side = MountSide(c,
+        byName.TryGetValue("Top 3D Body", out var tb) ? tb : null,
+        byName.TryGetValue("Bottom 3D Body", out var bb) ? bb : null);
+    var targetName = side == "bottom" ? "Bottom Assembly" : "Top Assembly";
+    var targetId = TargetLayer(byName, side, "Top Assembly", "Bottom Assembly");
+    if (targetId is null)
+        return (false, $"This library doesn't define a '{targetName}' layer — nothing to generate onto.");
+
+    var bodies = c.ComponentBodies.Cast<PcbComponentBody>().Where(b => b.Outline.Count >= 3).ToList();
+    List<List<CoordPoint>> loops;
+    CoordRect bbox;
+    string source;
+
+    if (bodies.Count > 0)
+    {
+        // Trace the body's own outline exactly — unlike the courtyard, there's no "boxy" simplification
+        // here, per the original spec ("a shape of the 3D body"); the body outline already IS the shape.
+        loops = bodies.Select(b => b.Outline.ToList()).ToList();
+        bbox = CoordRect.Union(bodies.Select(b => b.Bounds));
+        source = "3D body outline";
+    }
+    else
+    {
+        // No body: one continuous box around the outermost pads, not a per-pad boxy union — a 2-pad
+        // passive with a gap between pads should still get a single rectangle, not two disjoint shapes.
+        var padRects = c.Pads.Cast<PcbPad>().Where(p => !p.Bounds.IsEmpty).Select(p => p.Bounds).ToList();
+        if (padRects.Count == 0)
+            return (false, "Nothing to base an assembly outline on — this footprint has no 3D body and no pads.");
+        bbox = CoordRect.Union(padRects);
+        loops = SingleBoxOutline(bbox);
+        if (loops.Count == 0) return (false, "Could not compute an assembly outline from pads.");
+        source = "pad outline (no 3D body found)";
+    }
+
+    // Unchecking "Include .Designator" means leave whatever designator text is already there alone —
+    // it's specifically excluded from the clear, not wiped and left absent.
+    var cleared = ClearLayer(c, targetId.Value, preserveDesignatorText: !includeDesignator);
+    var segCount = loops.Sum(loop => DrawClosedLoop(c, loop, targetId.Value, Coord.FromMm(DrawingLineWidthMm)));
+
+    var extra = "";
+    if (includeDesignator && AddDesignatorText(c, targetId.Value, bbox))
+        extra = " + .Designator text";
+
+    return (true, $"Generated {targetName} from {source}: {segCount} segment(s) across {loops.Count} outline(s){extra}, replacing {cleared} old item(s).");
+}
+
+static (bool Ok, string Message) GeneratePin1Indicator(PcbComponent c, Dictionary<int, string> layerNames)
+{
+    var pin1 = c.Pads.Cast<PcbPad>().FirstOrDefault(p => (p.Designator ?? "").Trim() == "1");
+    if (pin1 is null)
+        return (false, "No pad numbered '1' found — nothing to mark.");
+
+    var byName = LayersByName(layerNames);
+    var side = MountSide(c,
+        byName.TryGetValue("Top 3D Body", out var tb) ? tb : null,
+        byName.TryGetValue("Bottom 3D Body", out var bb) ? bb : null);
+    var targetName = side == "bottom" ? "Bottom Assembly" : "Top Assembly";
+    var targetId = TargetLayer(byName, side, "Top Assembly", "Bottom Assembly");
+    if (targetId is null)
+        return (false, $"This library doesn't define a '{targetName}' layer — nothing to generate onto.");
+
+    // Inscribed inside the pad, not surrounding it — sized off the SMALLER pad dimension so the ring
+    // clears every edge (a wide/short pad would otherwise let a width-based radius poke past the top
+    // and bottom), with a floor so a very small pad still gets a visible, non-degenerate ring.
+    var padBounds = pin1.Bounds;
+    var minDim = Coord.Min(padBounds.Width, padBounds.Height);
+    var radius = Coord.Max(minDim / 2 - Coord.FromMm(Pin1EdgeMarginMm), Coord.FromMm(0.05));
+    c.AddArc(PcbArc.Create()
+        .Center(pin1.Location.X, pin1.Location.Y)
+        .Radius(radius)
+        .Width(Coord.FromMm(DrawingLineWidthMm))
+        .OnLayer(targetId.Value)
+        .FullCircle()
+        .Build());
+
+    return (true, $"Added a pin-1 ring on {targetName} around pad '{pin1.Designator}'. Click again to add another — this doesn't check for an existing one.");
+}
+
+// Removes every primitive of every kind on the given layer — "generating" a drawing replaces whatever
+// was there rather than adding to it (per the original request: clear the layer of old primitives and
+// designator text first). preserveDesignatorText skips any text with IsDesignator set — used when the
+// caller isn't (re)generating a designator string itself, so unchecking "Include .Designator" doesn't
+// delete one that was already there.
+static int ClearLayer(PcbComponent c, int layerId, bool preserveDesignatorText = false)
+{
+    var removed = 0;
+    foreach (var t in c.Tracks.Cast<PcbTrack>().Where(x => x.Layer == layerId).ToList()) { c.RemoveTrack(t); removed++; }
+    foreach (var a in c.Arcs.Cast<PcbArc>().Where(x => x.Layer == layerId).ToList()) { c.RemoveArc(a); removed++; }
+    foreach (var f in c.Fills.Cast<PcbFill>().Where(x => x.Layer == layerId).ToList()) { c.RemoveFill(f); removed++; }
+    foreach (var r in c.Regions.Cast<PcbRegion>().Where(x => x.Layer == layerId).ToList()) { c.RemoveRegion(r); removed++; }
+    foreach (var tx in c.Texts.Cast<PcbText>().Where(x => x.Layer == layerId && !(preserveDesignatorText && x.IsDesignator)).ToList()) { c.RemoveText(tx); removed++; }
+    foreach (var p in c.Pads.Cast<PcbPad>().Where(x => x.Layer == layerId).ToList()) { c.RemovePad(p); removed++; }
+    foreach (var v in c.Vias.Cast<PcbVia>().Where(x => x.Layer == layerId).ToList()) { c.RemoveVia(v); removed++; }
+    foreach (var b in c.ComponentBodies.Cast<PcbComponentBody>().Where(x => x.Layer == layerId).ToList()) { c.RemoveComponentBody(b); removed++; }
+    return removed;
+}
+
+// Draws a closed polygon as a chain of straight tracks, wrapping the last point back to the first.
+static int DrawClosedLoop(PcbComponent c, List<CoordPoint> loop, int layerId, Coord width)
+{
+    if (loop.Count < 2) return 0;
+    var n = 0;
+    for (int i = 0; i < loop.Count; i++)
+    {
+        var a = loop[i];
+        var b = loop[(i + 1) % loop.Count];
+        if (a.Equals(b)) continue;
+        c.AddTrack(PcbTrack.Create().From(a.X, a.Y).To(b.X, b.Y).Width(width).OnLayer(layerId).Build());
+        n++;
+    }
+    return n;
+}
+
+// Adds a centered ".Designator" special string. This placeholder text is a stand-in for whatever
+// short designator (R1, C23, U5, ...) Altium substitutes once the footprint is actually placed on a
+// design, so it's sized for THAT, not for its own literal length: height is capped by the box's
+// Y-extent (must fit fully) and by fitting ~DesignatorTargetChars average-width characters across the
+// X-extent (a real 2-4 character designator will fit; the 11-character ".Designator" placeholder
+// itself is expected to overflow X — that's fine), and by an absolute 40 mil ceiling regardless of how
+// much room the box has. Stroke width follows the requested 20:3 height:width ratio.
+//
+// Location is set to the box's CENTER, with Justification=CenterCenter — not a manually-computed
+// bottom-left corner for the placeholder string's own width. That distinction matters once Altium
+// substitutes the real (shorter, variable-length) designator: with true center justification Altium
+// re-centers it around Location automatically, same as it does live in the editor; a bottom-left
+// anchor sized for ".Designator" would leave a short real designator visibly offset instead of
+// centered. Confirmed via a user-supplied test library that Justification (stored at the same byte as
+// the historically inverted-rectangle-only InvertedRectJustification) governs plain text the same way.
+//
+// Returns false (no-op) if the box is degenerate or the font has nothing to lay out.
+static bool AddDesignatorText(PcbComponent c, int layerId, CoordRect bbox)
+{
+    const string designatorText = ".Designator";
+    var style = AltiumStrokeFont.FromStrokeFont(PcbStrokeFont.Default);
+    var segments = AltiumStrokeFont.Layout(designatorText, style, out var advanceWidth);
+    if (segments.Count == 0 || advanceWidth <= 0 || bbox.IsEmpty) return false;
+
+    var avgCharWidth = advanceWidth / designatorText.Length;
+    var heightFromY = bbox.Height * DesignatorFitMargin;
+    var heightFromX = bbox.Width * DesignatorFitMargin / (DesignatorTargetChars * avgCharWidth);
+    var height = Coord.Min(Coord.Min(heightFromY, heightFromX), Coord.FromMils(DesignatorMaxHeightMils));
+    if (height <= Coord.Zero) return false;
+
+    var text = PcbText.Create(designatorText)
+        .At(bbox.Center.X, bbox.Center.Y)
+        .Height(height)
+        .StrokeWidth(height * DesignatorStrokeRatio)
+        .OnLayer(layerId)
+        .Build();
+    text.IsDesignator = true;
+    text.TextKind = PcbTextKind.Stroke;
+    text.UnderlyingString = designatorText;
+    text.InvertedRectJustification = PcbTextJustification.CenterCenter;
+    // The justification byte is only honored when this companion flag says it's meaningful —
+    // confirmed against a user-supplied 8-component ground-truth library where every real,
+    // Altium-authored text record had this set to true regardless of which justification it used.
+    // Without it, Altium silently falls back to bottom-left anchoring no matter what
+    // InvertedRectJustification says — exactly the bug this was written to fix.
+    text.IsJustificationValid = true;
+    c.AddText(text);
+    return true;
+}
+
+// A single rectangle expressed as one closed 4-point loop — the "continuous box around the outermost
+// pads" fallback (as opposed to BoxyUnionOutline's per-rectangle shape-following, which can come out
+// disjointed when there's no body to anchor the pads together, e.g. a 2-pad passive with a gap
+// between its pads). Empty box → no loops.
+static List<List<CoordPoint>> SingleBoxOutline(CoordRect box)
+{
+    if (box.IsEmpty) return new();
+    return new() { new List<CoordPoint> { box.Min, new(box.Max.X, box.Min.Y), box.Max, new(box.Min.X, box.Max.Y) } };
+}
+
+// Computes the outer boundary of the union of a set of axis-aligned rectangles as one or more closed
+// rectilinear polygons — straight horizontal/vertical edges only, no arcs, no exact-shape hugging (the
+// "boxy" courtyard/pad-fallback outline). Standard "grid + boundary edge" contour trace: coordinate-
+// compress into a grid of cells, mark which cells are covered by at least one input rectangle, then
+// any cell-boundary edge with exactly one covered side is part of the contour; walk those edges (each
+// emitted with a consistent counter-clockwise orientation, so every boundary vertex has exactly one
+// outgoing edge) into closed loops, then collapse collinear runs into single segments.
+// Known limitation: a shape that touches itself at exactly one point (e.g. two rectangles meeting only
+// at a corner) can produce an ambiguous vertex with two valid outgoing edges; the last one processed
+// wins. Not expected for real body/pad geometry.
+static List<List<CoordPoint>> BoxyUnionOutline(IReadOnlyList<CoordRect> rects)
+{
+    var real = rects.Where(r => !r.IsEmpty).ToList();
+    if (real.Count == 0) return new();
+
+    var xs = real.SelectMany(r => new[] { r.Min.X, r.Max.X }).Distinct().OrderBy(x => x).ToList();
+    var ys = real.SelectMany(r => new[] { r.Min.Y, r.Max.Y }).Distinct().OrderBy(y => y).ToList();
+    int nx = xs.Count - 1, ny = ys.Count - 1;
+    if (nx < 1 || ny < 1) return new();
+
+    var filled = new bool[nx, ny];
+    for (int i = 0; i < nx; i++)
+    {
+        var midX = xs[i] + (xs[i + 1] - xs[i]) / 2;
+        for (int j = 0; j < ny; j++)
+        {
+            var midY = ys[j] + (ys[j + 1] - ys[j]) / 2;
+            var p = new CoordPoint(midX, midY);
+            filled[i, j] = real.Any(r => r.Contains(p));
+        }
+    }
+
+    // Each boundary edge is emitted walking counter-clockwise around its filled cell, so every vertex
+    // ends up with exactly one outgoing edge (the invariant the loop-walk below relies on).
+    var outgoing = new Dictionary<CoordPoint, CoordPoint>();
+    for (int i = 0; i < nx; i++)
+    for (int j = 0; j < ny; j++)
+    {
+        if (!filled[i, j]) continue;
+        if (i == 0 || !filled[i - 1, j]) outgoing[new(xs[i], ys[j])] = new(xs[i], ys[j + 1]);                 // left edge, upward
+        if (i == nx - 1 || !filled[i + 1, j]) outgoing[new(xs[i + 1], ys[j + 1])] = new(xs[i + 1], ys[j]);    // right edge, downward
+        if (j == 0 || !filled[i, j - 1]) outgoing[new(xs[i + 1], ys[j])] = new(xs[i], ys[j]);                 // bottom edge, leftward
+        if (j == ny - 1 || !filled[i, j + 1]) outgoing[new(xs[i], ys[j + 1])] = new(xs[i + 1], ys[j + 1]);    // top edge, rightward
+    }
+
+    var visited = new HashSet<CoordPoint>();
+    var loops = new List<List<CoordPoint>>();
+    foreach (var start in outgoing.Keys)
+    {
+        if (visited.Contains(start)) continue;
+        var raw = new List<CoordPoint> { start };
+        var cur = start;
+        while (true)
+        {
+            visited.Add(cur);
+            var next = outgoing[cur];
+            if (next.Equals(start)) break;
+            raw.Add(next);
+            cur = next;
+        }
+        if (raw.Count >= 3) loops.Add(SimplifyCollinear(raw));
+    }
+    return loops;
+}
+
+// Merges consecutive collinear points on a closed (circular) rectilinear polyline into single
+// segments, so a long straight run of grid cells becomes one track instead of many tiny ones.
+static List<CoordPoint> SimplifyCollinear(List<CoordPoint> pts)
+{
+    if (pts.Count < 3) return pts;
+    var result = new List<CoordPoint>();
+    int n = pts.Count;
+    for (int i = 0; i < n; i++)
+    {
+        var prev = pts[(i - 1 + n) % n];
+        var cur = pts[i];
+        var next = pts[(i + 1) % n];
+        var sameLine = (prev.X == cur.X && cur.X == next.X) || (prev.Y == cur.Y && cur.Y == next.Y);
+        if (!sameLine) result.Add(cur);
+    }
+    return result.Count >= 3 ? result : pts;
+}
+
 // One content-sanity finding from ContentWarnings. LayerId/Kind are set only when the warning is
 // directly actionable via reassignment — the front-end uses them to reveal that specific layer's
 // reassignment dropdown for that specific kind, exactly like an illegal-layer flag does — and left
@@ -643,6 +1017,12 @@ record PrimRef(string PrimKind, int PrimIndex);
 
 // The multi-primitive reassignment request: every Prims entry moves to the same ToLayer.
 record ReassignManyRequest(string Id, int Index, List<PrimRef> Prims, int ToLayer);
+
+// The courtyard / pin-1 generation request: just the footprint to act on.
+record GenerateRequest(string Id, int Index);
+
+// The assembly-outline generation request: whether to also add a centered ".Designator" string.
+record GenerateAssemblyRequest(string Id, int Index, bool IncludeDesignator);
 
 // The export request: just the library id — the whole (possibly reassigned) library is serialized.
 record ExportRequest(string Id);
