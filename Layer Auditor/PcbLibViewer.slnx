@@ -12,6 +12,7 @@
   <Folder Name="/src/">
     <Project Path="src/OriginalCircuit.Altium.Generators/OriginalCircuit.Altium.Generators.csproj" />
     <Project Path="src/OriginalCircuit.Altium.Rendering.Core/OriginalCircuit.Altium.Rendering.Core.csproj" />
+    <Project Path="src/OriginalCircuit.Altium.Rendering.Step/OriginalCircuit.Altium.Rendering.Step.csproj" />
     <Project Path="src/OriginalCircuit.Altium.Rendering.Svg/OriginalCircuit.Altium.Rendering.Svg.csproj" />
     <Project Path="src/OriginalCircuit.Altium/OriginalCircuit.Altium.csproj" />
   </Folder>

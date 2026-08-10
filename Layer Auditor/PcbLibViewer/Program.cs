@@ -24,6 +24,7 @@ using System.Text;
 using OriginalCircuit.Altium;
 using OriginalCircuit.Altium.Models.Pcb;
 using OriginalCircuit.Altium.Rendering;
+using OriginalCircuit.Altium.Rendering.Step;
 using OriginalCircuit.Altium.Rendering.Svg;
 using OriginalCircuit.Altium.Serialization.Writers;
 using OriginalCircuit.Eda.Enums;
@@ -316,11 +317,11 @@ app.MapPost("/api/generate/courtyard", (GenerateRequest req, LibraryCache cache)
 {
     var entry = cache.Get(req.Id);
     if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
-    var (_, components, layerNames, _) = entry.Value;
+    var (library, components, layerNames, _) = entry.Value;
     if (req.Index < 0 || req.Index >= components.Count)
         return Results.BadRequest(new { error = "Footprint index out of range." });
 
-    var (ok, message) = GenerateCourtyard(components[req.Index], layerNames);
+    var (ok, message) = GenerateCourtyard(components[req.Index], layerNames, library.Models);
     return Results.Json(new { ok, message });
 });
 
@@ -331,11 +332,11 @@ app.MapPost("/api/generate/assembly", (GenerateAssemblyRequest req, LibraryCache
 {
     var entry = cache.Get(req.Id);
     if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
-    var (_, components, layerNames, _) = entry.Value;
+    var (library, components, layerNames, _) = entry.Value;
     if (req.Index < 0 || req.Index >= components.Count)
         return Results.BadRequest(new { error = "Footprint index out of range." });
 
-    var (ok, message) = GenerateAssembly(components[req.Index], layerNames, req.IncludeDesignator);
+    var (ok, message) = GenerateAssembly(components[req.Index], layerNames, req.IncludeDesignator, library.Models);
     return Results.Json(new { ok, message });
 });
 
@@ -686,7 +687,7 @@ const double DesignatorMaxHeightMils = 40; // hard cap regardless of how much Y-
 static int? TargetLayer(Dictionary<string, int> byName, string? side, string topName, string bottomName) =>
     byName.TryGetValue(side == "bottom" ? bottomName : topName, out var id) ? id : null;
 
-static (bool Ok, string Message) GenerateCourtyard(PcbComponent c, Dictionary<int, string> layerNames)
+static (bool Ok, string Message) GenerateCourtyard(PcbComponent c, Dictionary<int, string> layerNames, List<PcbModel> models)
 {
     var byName = LayersByName(layerNames);
     var side = MountSide(c,
@@ -705,12 +706,29 @@ static (bool Ok, string Message) GenerateCourtyard(PcbComponent c, Dictionary<in
         return (false, "Nothing to base a courtyard on — this footprint has no 3D body and no pads.");
 
     List<List<CoordPoint>> loops;
+    var projectedCount = 0;
     if (bodies.Count > 0)
     {
         // A body is real ground truth for the part's shape, so the courtyard is allowed to roughly
-        // follow it (and the pads) rather than reduce everything to one rectangle.
+        // follow it (and the pads) rather than reduce everything to one rectangle. Its rectangle
+        // comes from the true top-down STEP silhouette's bounds when one is available (a closer fit
+        // than the stored, rough Outline's bounds), falling back to the stored Outline's bounds
+        // otherwise — either way the courtyard itself stays a boxy union of rects, unchanged from
+        // before this only makes the per-body rectangle tighter/more accurate.
+        var projCache = StepBodyOutline.CreateCache();
         var rects = new List<CoordRect>();
-        foreach (var b in bodies) rects.Add(b.Bounds.Inflate(clearance));
+        foreach (var b in bodies)
+        {
+            var projected = StepBodyOutline.TryProjectTopDown(b, models, projCache);
+            CoordRect bodyRect;
+            if (projected is { Count: > 0 })
+            {
+                bodyRect = CoordRect.Union(projected.Select(loop => CoordRect.Union(loop.Select(p => new CoordRect(p, p)))));
+                projectedCount++;
+            }
+            else bodyRect = b.Bounds;
+            rects.Add(bodyRect.Inflate(clearance));
+        }
         foreach (var r in padRects) rects.Add(r.Inflate(clearance));
         loops = BoxyUnionOutline(rects);
     }
@@ -728,10 +746,11 @@ static (bool Ok, string Message) GenerateCourtyard(PcbComponent c, Dictionary<in
     var lineWidth = Coord.FromMm(DrawingLineWidthMm);
     var segCount = loops.Sum(loop => DrawClosedLoop(c, loop, targetId.Value, lineWidth));
 
-    return (true, $"Generated {targetName}: {segCount} segment(s) across {loops.Count} outline(s), replacing {cleared} old item(s).");
+    var basis = projectedCount > 0 ? $", {projectedCount} body rect(s) from STEP projection" : "";
+    return (true, $"Generated {targetName}: {segCount} segment(s) across {loops.Count} outline(s){basis}, replacing {cleared} old item(s).");
 }
 
-static (bool Ok, string Message) GenerateAssembly(PcbComponent c, Dictionary<int, string> layerNames, bool includeDesignator)
+static (bool Ok, string Message) GenerateAssembly(PcbComponent c, Dictionary<int, string> layerNames, bool includeDesignator, List<PcbModel> models)
 {
     var byName = LayersByName(layerNames);
     var side = MountSide(c,
@@ -742,18 +761,37 @@ static (bool Ok, string Message) GenerateAssembly(PcbComponent c, Dictionary<int
     if (targetId is null)
         return (false, $"This library doesn't define a '{targetName}' layer — nothing to generate onto.");
 
-    var bodies = c.ComponentBodies.Cast<PcbComponentBody>().Where(b => b.Outline.Count >= 3).ToList();
+    // A body only counts as usable ground truth once we know its shape one way or another: either a
+    // real STEP model we can project top-down (the accurate case), or a non-degenerate stored Outline
+    // to fall back on for bodies whose model can't be projected (no ModelId, unsupported STEP feature, ...).
+    var allBodies = c.ComponentBodies.Cast<PcbComponentBody>().ToList();
+    var projCache = StepBodyOutline.CreateCache();
+    var perBody = allBodies
+        .Select(b => (Body: b, Projected: StepBodyOutline.TryProjectTopDown(b, models, projCache)))
+        .Where(x => x.Projected is { Count: > 0 } || x.Body.Outline.Count >= 3)
+        .ToList();
+
     List<List<CoordPoint>> loops;
     CoordRect bbox;
     string source;
 
-    if (bodies.Count > 0)
+    if (perBody.Count > 0)
     {
-        // Trace the body's own outline exactly — unlike the courtyard, there's no "boxy" simplification
-        // here, per the original spec ("a shape of the 3D body"); the body outline already IS the shape.
-        loops = bodies.Select(b => b.Outline.ToList()).ToList();
-        bbox = CoordRect.Union(bodies.Select(b => b.Bounds));
-        source = "3D body outline";
+        // Prefer the true top-down STEP silhouette per body — an accurate trace of the real 3D
+        // geometry, not the rough polygon Altium stores in Outline — falling back to that stored
+        // Outline only for bodies whose model couldn't be projected. Unlike the courtyard, there's no
+        // "boxy" simplification here, per the original spec ("a shape of the 3D body"); either source
+        // already IS the shape.
+        loops = perBody.SelectMany(x => x.Projected ?? new List<List<CoordPoint>> { x.Body.Outline.ToList() }).ToList();
+        bbox = CoordRect.Union(perBody.Select(x => x.Projected is { Count: > 0 } proj
+            ? CoordRect.Union(proj.SelectMany(loop => loop).Select(p => new CoordRect(p, p)))
+            : x.Body.Bounds));
+        var projectedCount = perBody.Count(x => x.Projected is { Count: > 0 });
+        source = projectedCount == perBody.Count
+            ? "STEP model projection"
+            : projectedCount > 0
+                ? $"STEP model projection ({projectedCount}/{perBody.Count} bodies) + stored 3D body outline"
+                : "3D body outline";
     }
     else
     {

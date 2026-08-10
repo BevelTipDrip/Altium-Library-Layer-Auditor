@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <PackageId>OriginalCircuit.Altium.Rendering.Step</PackageId>
+    <Description>Accurate top-down 2D projection of embedded STEP component bodies for Altium Designer PCB footprints (courtyard/assembly outline generation).</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OriginalCircuit.Altium\OriginalCircuit.Altium.csproj" />
+    <!-- CoordPoint/Coord live in Eda.Abstractions, which OriginalCircuit.Altium references with
+         PrivateAssets="all" (not flowed transitively) — reference it explicitly, same as the other
+         src/* projects that use these types directly. -->
+    <ProjectReference Include="..\..\shared\OriginalCircuit.Eda.Abstractions\src\OriginalCircuit.Eda.Abstractions\OriginalCircuit.Eda.Abstractions.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!--
+    STEP parsing/tessellation lives in the OriginalCircuit.Mech.STEP sibling repo, vendored as a
+    submodule under shared/ (see ../../.gitmodules). Referenced via ProjectReference (interim, until
+    it publishes to NuGet) with PrivateAssets="all"; its built assembly is bundled into this
+    package's lib/ folder by the _IncludeSharedEdaAssemblies target in Directory.Build.props.
+    Referencing Tessellation pulls Schema/Topology/Geometry/Core transitively. This project does NOT
+    need OriginalCircuit.Mech.GLTF — we only need the triangle mesh, not a glTF export.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\shared\OriginalCircuit.Mech.STEP\src\OriginalCircuit.Mech.STEP.Tessellation\OriginalCircuit.Mech.STEP.Tessellation.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
