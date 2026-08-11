@@ -1,0 +1,11 @@
+# Build output (note: some older bin/obj files predate this .gitignore and remain tracked —
+# this only stops NEW build output from being picked up, it doesn't untrack those).
+[Bb]in/
+[Oo]bj/
+
+# dotnet publish output / release artifacts (e.g. `dotnet publish ... -o release/...`).
+/release/
+
+# Editor/IDE
+.vs/
+.vscode/

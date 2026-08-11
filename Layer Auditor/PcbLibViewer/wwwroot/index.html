@@ -177,6 +177,15 @@ aside.report{border-right:none; border-left:1px solid var(--line)}
 .check-row input{accent-color:var(--copper)}
 #spAssignBtn{margin-top:10px; width:100%}
 
+.slider-row{margin:9px 0}
+.slider-row .slider-label{display:flex; justify-content:space-between; align-items:baseline; font-size:11px; color:var(--ink-dim); margin-bottom:4px}
+.slider-row .slider-val{color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums}
+.slider-row input[type="range"]{
+  width:100%; accent-color:var(--copper); background:transparent; cursor:pointer; margin:0; height:16px;
+}
+.gen-subsec{border-top:1px solid var(--line); margin-top:12px; padding-top:12px}
+.gen-subsec h3{margin:0 0 4px; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); font-weight:600}
+
 #genReportBtn{margin-top:12px; width:100%}
 
 /* report panel */
@@ -289,23 +298,60 @@ body.dragging .drop .ring{border-color:var(--copper); box-shadow:0 0 40px rgba(2
 
       <div class="sec" id="genDrawingsSec">
         <h2>Generate Drawings</h2>
-        <button class="btn" id="genCourtyardBtn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>
-          Generate Courtyard
-        </button>
-        <button class="btn" id="genAssemblyBtn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"/><path d="M3 9h18"/></svg>
-          Generate Assembly Outline
-        </button>
-        <label class="check-row">
-          <input type="checkbox" id="genIncludeDesignator" checked>
-          Include .Designator text
-        </label>
-        <button class="btn" id="genPin1Btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/></svg>
-          Generate Pin-1 Indicator
-        </button>
-        <div class="hint">Fills in missing documentation from the part's own geometry (3D body outline, pad extents) — courtyard and assembly outline each replace whatever's currently on their layer; pin-1 only adds a ring, it doesn't clear anything.</div>
+
+        <div class="gen-subsec" style="border-top:none; margin-top:0; padding-top:0">
+          <h3>Courtyard</h3>
+          <button class="btn" id="genCourtyardBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>
+            Generate Courtyard
+          </button>
+          <div class="slider-row">
+            <div class="slider-label"><span>Body Offset</span><span class="slider-val" id="cyBodyOffsetVal">0.15mm</span></div>
+            <input type="range" id="cyBodyOffset" min="0" max="1" step="0.025" value="0.15">
+          </div>
+          <div class="slider-row">
+            <div class="slider-label"><span>Pad Offset</span><span class="slider-val" id="cyPadOffsetVal">0.15mm</span></div>
+            <input type="range" id="cyPadOffset" min="0" max="1" step="0.025" value="0.15">
+          </div>
+          <div class="slider-row">
+            <div class="slider-label"><span>Smoothing</span><span class="slider-val" id="cySmoothingVal">0.15mm</span></div>
+            <input type="range" id="cySmoothing" min="0" max="1" step="0.025" value="0.15">
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="cySimpleMode">
+            Simple mode (bounding box, no 3D model)
+          </label>
+        </div>
+
+        <div class="gen-subsec">
+          <h3>Assembly Outline</h3>
+          <button class="btn" id="genAssemblyBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"/><path d="M3 9h18"/></svg>
+            Generate Assembly Outline
+          </button>
+          <label class="check-row">
+            <input type="checkbox" id="genIncludeDesignator" checked>
+            Include .Designator text
+          </label>
+          <div class="slider-row">
+            <div class="slider-label"><span>Smoothing</span><span class="slider-val" id="asmSmoothingVal">0.15mm</span></div>
+            <input type="range" id="asmSmoothing" min="0" max="1" step="0.025" value="0.15">
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="asmSimpleMode">
+            Simple mode (stored body outline, no 3D model)
+          </label>
+        </div>
+
+        <div class="gen-subsec">
+          <h3>Pin-1 Indicator</h3>
+          <button class="btn" id="genPin1Btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/></svg>
+            Generate Pin-1 Indicator
+          </button>
+        </div>
+
+        <div class="hint">Fills in missing documentation from the part's own geometry — by default, a true top-down projection of the embedded 3D STEP model where one exists (Smoothing loosens how closely the traced outline follows small fillets/notches; Simple mode skips the 3D model and falls back to a plain bounding-box/stored-outline shape). Courtyard and assembly outline each replace whatever's currently on their layer; pin-1 only adds a ring, it doesn't clear anything.</div>
       </div>
 
       <div class="sec" id="selPrimSec" style="display:none">
@@ -420,6 +466,13 @@ $('#spAssignBtn').onclick = assignSelectedPrim;
 $('#genCourtyardBtn').onclick = ()=>generateDrawing('courtyard');
 $('#genAssemblyBtn').onclick = ()=>generateDrawing('assembly');
 $('#genPin1Btn').onclick = ()=>generateDrawing('pin1');
+// Live "N.NNNmm" readout next to each Generate Drawings slider.
+for(const id of ['cyBodyOffset','cyPadOffset','cySmoothing','asmSmoothing']){
+  const input=$('#'+id), val=$('#'+id+'Val');
+  const update=()=>{ val.textContent = Number(input.value).toFixed(3).replace(/0+$/,'').replace(/\.$/,'') + 'mm'; };
+  input.oninput = update;
+  update();
+}
 window.addEventListener('keydown', e=>{
   if(e.key==='Escape'){ clearPrimSelection(); return; }
   if(e.key==='Tab' && state.selPrims.length && !['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)){
@@ -801,7 +854,17 @@ async function generateDrawing(kind){
   setStatus('busy','generating…');
   try{
     const body = {id:state.id, index:state.selected};
-    if(kind==='assembly') body.includeDesignator = $('#genIncludeDesignator').checked;
+    if(kind==='courtyard'){
+      body.bodyOffsetMm = +$('#cyBodyOffset').value;
+      body.padOffsetMm = +$('#cyPadOffset').value;
+      body.smoothingMm = +$('#cySmoothing').value;
+      body.simpleMode = $('#cySimpleMode').checked;
+    }
+    if(kind==='assembly'){
+      body.includeDesignator = $('#genIncludeDesignator').checked;
+      body.smoothingMm = +$('#asmSmoothing').value;
+      body.simpleMode = $('#asmSimpleMode').checked;
+    }
     const res=await fetch(GEN_ENDPOINTS[kind],{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error||'generate failed'); }
     const data=await res.json();

@@ -43,6 +43,25 @@ app.UseStaticFiles();
 
 var svg = new SvgRenderer();
 
+// mm constants rather than pre-built Coord values: top-level-statement files can't hold static
+// readonly fields for a static local function to capture (static locals capture nothing at all), and
+// Coord.FromMm is cheap enough to just call at each use site. Declared here (ahead of the endpoints
+// that reference them) because top-level-statement locals must be declared before use, unlike fields.
+const double DefaultBodyOffsetMm = 0.15;   // courtyard keepout margin outside the body, when unspecified
+const double DefaultPadOffsetMm = 0.15;    // courtyard keepout margin outside pads, when unspecified
+const double DefaultSmoothingMm = 0.15;    // STEP-outline simplification tolerance, when unspecified —
+                                            // deliberately looser than the rasterization grid itself, so
+                                            // the traced shape reads as a general "boxy" outline rather
+                                            // than tracing every fillet/notch in the real 3D geometry
+const double DrawingLineWidthMm = 0.1;     // assembly + courtyard track/ring width
+const double Pin1EdgeMarginMm = 0.1;       // gap kept between the ring and the pad's own edge
+const double DesignatorStrokeRatio = 3.0 / 20.0;  // height:stroke-width = 20:3
+const double DesignatorFitMargin = 0.92;   // small margin so text doesn't touch the edges
+const double DesignatorTargetChars = 4;    // size for ~4 characters across the X extent — the
+                                            // ".Designator" placeholder is longer and is expected to
+                                            // overflow X; a real resolved designator (R1, C23, ...) won't
+const double DesignatorMaxHeightMils = 40; // hard cap regardless of how much Y-room is available
+
 // ── Upload: parse the library once and cache it, return the footprint list ───
 app.MapPost("/api/upload", async (IFormFile file, LibraryCache cache, CancellationToken ct) =>
 {
@@ -309,11 +328,12 @@ app.MapPost("/api/reassign-many", (ReassignManyRequest req, LibraryCache cache) 
 });
 
 // ── Generate Courtyard: for footprints missing this documentation outright (not just using the wrong
-// layer for it — see ContentWarnings for that case). Draws a boxy keepout outline — the union of the
-// 3D body's and every pad's extents, each expanded 0.15mm, unioned and traced with straight
-// horizontal/vertical segments only — onto the footprint's mount-side Courtyard layer, replacing
-// whatever was there before.
-app.MapPost("/api/generate/courtyard", (GenerateRequest req, LibraryCache cache) =>
+// layer for it — see ContentWarnings for that case). Draws a keepout outline onto the footprint's
+// mount-side Courtyard layer, replacing whatever was there before — by default the body's true
+// top-down STEP silhouette (expanded by BodyOffsetMm) unioned with each pad's extent (expanded by
+// PadOffsetMm), or a boxy rectangle union of the same when SimpleMode is set / no body has a usable
+// STEP model.
+app.MapPost("/api/generate/courtyard", (GenerateCourtyardRequest req, LibraryCache cache) =>
 {
     var entry = cache.Get(req.Id);
     if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
@@ -321,13 +341,17 @@ app.MapPost("/api/generate/courtyard", (GenerateRequest req, LibraryCache cache)
     if (req.Index < 0 || req.Index >= components.Count)
         return Results.BadRequest(new { error = "Footprint index out of range." });
 
-    var (ok, message) = GenerateCourtyard(components[req.Index], layerNames, library.Models);
+    var (ok, message) = GenerateCourtyard(components[req.Index], layerNames, library.Models,
+        req.BodyOffsetMm ?? DefaultBodyOffsetMm, req.PadOffsetMm ?? DefaultPadOffsetMm,
+        req.SmoothingMm ?? DefaultSmoothingMm, req.SimpleMode);
     return Results.Json(new { ok, message });
 });
 
-// ── Generate Assembly Outline: traces the 3D body's own outline (or, when there's no body at all, a
-// boxy union of the pad extents instead) onto the footprint's mount-side Assembly layer, replacing
-// whatever was there. Optionally adds a centered ".Designator" special string sized to fit inside it.
+// ── Generate Assembly Outline: traces the 3D body's true top-down STEP silhouette (or, when
+// SimpleMode is set / there's no usable STEP model, the stored 3D body outline — or, when there's no
+// body at all, a boxy union of the pad extents instead) onto the footprint's mount-side Assembly
+// layer, replacing whatever was there. Optionally adds a centered ".Designator" special string sized
+// to fit inside it.
 app.MapPost("/api/generate/assembly", (GenerateAssemblyRequest req, LibraryCache cache) =>
 {
     var entry = cache.Get(req.Id);
@@ -336,7 +360,8 @@ app.MapPost("/api/generate/assembly", (GenerateAssemblyRequest req, LibraryCache
     if (req.Index < 0 || req.Index >= components.Count)
         return Results.BadRequest(new { error = "Footprint index out of range." });
 
-    var (ok, message) = GenerateAssembly(components[req.Index], layerNames, req.IncludeDesignator, library.Models);
+    var (ok, message) = GenerateAssembly(components[req.Index], layerNames, req.IncludeDesignator, library.Models,
+        req.SmoothingMm ?? DefaultSmoothingMm, req.SimpleMode);
     return Results.Json(new { ok, message });
 });
 
@@ -671,23 +696,12 @@ static string? MountSide(PcbComponent c, int? topBody, int? bottomBody)
 // MountSide's guess ("bottom" only when the evidence is unambiguous; "top" for "top", "both", or
 // unknown — a courtyard/assembly still has to go somewhere, and top is the default authoring side).
 
-// mm constants rather than pre-built Coord values: top-level-statement files can't hold static
-// readonly fields for a static local function to capture (static locals capture nothing at all), and
-// Coord.FromMm is cheap enough to just call at each use site.
-const double CourtyardClearanceMm = 0.15;  // keepout margin outside body/pads
-const double DrawingLineWidthMm = 0.1;     // assembly + courtyard track/ring width
-const double Pin1EdgeMarginMm = 0.1;       // gap kept between the ring and the pad's own edge
-const double DesignatorStrokeRatio = 3.0 / 20.0;  // height:stroke-width = 20:3
-const double DesignatorFitMargin = 0.92;   // small margin so text doesn't touch the edges
-const double DesignatorTargetChars = 4;    // size for ~4 characters across the X extent — the
-                                            // ".Designator" placeholder is longer and is expected to
-                                            // overflow X; a real resolved designator (R1, C23, ...) won't
-const double DesignatorMaxHeightMils = 40; // hard cap regardless of how much Y-room is available
-
 static int? TargetLayer(Dictionary<string, int> byName, string? side, string topName, string bottomName) =>
     byName.TryGetValue(side == "bottom" ? bottomName : topName, out var id) ? id : null;
 
-static (bool Ok, string Message) GenerateCourtyard(PcbComponent c, Dictionary<int, string> layerNames, List<PcbModel> models)
+static (bool Ok, string Message) GenerateCourtyard(
+    PcbComponent c, Dictionary<int, string> layerNames, List<PcbModel> models,
+    double bodyOffsetMm, double padOffsetMm, double smoothingMm, bool simpleMode)
 {
     var byName = LayersByName(layerNames);
     var side = MountSide(c,
@@ -698,38 +712,37 @@ static (bool Ok, string Message) GenerateCourtyard(PcbComponent c, Dictionary<in
     if (targetId is null)
         return (false, $"This library doesn't define a '{targetName}' layer — nothing to generate onto.");
 
-    var clearance = Coord.FromMm(CourtyardClearanceMm);
+    var bodyOffset = Coord.FromMm(bodyOffsetMm);
     var bodies = c.ComponentBodies.Cast<PcbComponentBody>().Where(b => !b.Bounds.IsEmpty).ToList();
     var padRects = c.Pads.Cast<PcbPad>().Where(p => !p.Bounds.IsEmpty).Select(p => p.Bounds).ToList();
+    var offsetPadRects = padRects.Select(r => r.Inflate(Coord.FromMm(padOffsetMm))).ToList();
 
     if (bodies.Count == 0 && padRects.Count == 0)
         return (false, "Nothing to base a courtyard on — this footprint has no 3D body and no pads.");
 
-    List<List<CoordPoint>> loops;
     var projectedCount = 0;
-    if (bodies.Count > 0)
+    List<List<CoordPoint>>? stepLoops = null;
+    if (bodies.Count > 0 && !simpleMode)
     {
-        // A body is real ground truth for the part's shape, so the courtyard is allowed to roughly
-        // follow it (and the pads) rather than reduce everything to one rectangle. Its rectangle
-        // comes from the true top-down STEP silhouette's bounds when one is available (a closer fit
-        // than the stored, rough Outline's bounds), falling back to the stored Outline's bounds
-        // otherwise — either way the courtyard itself stays a boxy union of rects, unchanged from
-        // before this only makes the per-body rectangle tighter/more accurate.
-        var projCache = StepBodyOutline.CreateCache();
-        var rects = new List<CoordRect>();
-        foreach (var b in bodies)
-        {
-            var projected = StepBodyOutline.TryProjectTopDown(b, models, projCache);
-            CoordRect bodyRect;
-            if (projected is { Count: > 0 })
-            {
-                bodyRect = CoordRect.Union(projected.Select(loop => CoordRect.Union(loop.Select(p => new CoordRect(p, p)))));
-                projectedCount++;
-            }
-            else bodyRect = b.Bounds;
-            rects.Add(bodyRect.Inflate(clearance));
-        }
-        foreach (var r in padRects) rects.Add(r.Inflate(clearance));
+        // Traces each body's true top-down STEP silhouette (dilated by bodyOffsetMm via distance-
+        // transform, not just its bounding box) unioned with the offset pad rects — a real offset
+        // outline, not a rectangle standing in for the body. Bodies without a usable STEP model still
+        // contribute their bounding rect inside the same combined outline.
+        (stepLoops, projectedCount) = StepBodyOutline.TryProjectCourtyardOutline(
+            bodies, models, bodyOffsetMm, offsetPadRects, smoothingMm, StepBodyOutline.CreateCache());
+    }
+
+    var usedStepOutline = stepLoops is { Count: > 0 };
+    List<List<CoordPoint>> loops;
+    if (usedStepOutline)
+    {
+        loops = stepLoops!;
+    }
+    else if (bodies.Count > 0)
+    {
+        // Simple mode, or no body had a usable STEP model to project: the exact (non-rasterized)
+        // rectangle union — each body's bounding box, each pad, all inflated by their own offset.
+        var rects = bodies.Select(b => b.Bounds.Inflate(bodyOffset)).Concat(offsetPadRects).ToList();
         loops = BoxyUnionOutline(rects);
     }
     else
@@ -737,8 +750,9 @@ static (bool Ok, string Message) GenerateCourtyard(PcbComponent c, Dictionary<in
         // No body: pads are the only evidence, and a boxy union of individually-inflated pad rects can
         // come out disjointed (e.g. a 2-pad passive with a gap between pads) — one continuous box
         // around the outermost pads is what was actually asked for here.
-        loops = SingleBoxOutline(CoordRect.Union(padRects).Inflate(clearance));
+        loops = SingleBoxOutline(CoordRect.Union(offsetPadRects));
     }
+
     if (loops.Count == 0)
         return (false, "Could not compute a courtyard outline.");
 
@@ -746,11 +760,17 @@ static (bool Ok, string Message) GenerateCourtyard(PcbComponent c, Dictionary<in
     var lineWidth = Coord.FromMm(DrawingLineWidthMm);
     var segCount = loops.Sum(loop => DrawClosedLoop(c, loop, targetId.Value, lineWidth));
 
-    var basis = projectedCount > 0 ? $", {projectedCount} body rect(s) from STEP projection" : "";
+    var basis = simpleMode
+        ? " (simple mode — bounding box only)"
+        : usedStepOutline
+            ? $" — body traced from STEP projection ({projectedCount}/{bodies.Count} bodies)"
+            : "";
     return (true, $"Generated {targetName}: {segCount} segment(s) across {loops.Count} outline(s){basis}, replacing {cleared} old item(s).");
 }
 
-static (bool Ok, string Message) GenerateAssembly(PcbComponent c, Dictionary<int, string> layerNames, bool includeDesignator, List<PcbModel> models)
+static (bool Ok, string Message) GenerateAssembly(
+    PcbComponent c, Dictionary<int, string> layerNames, bool includeDesignator, List<PcbModel> models,
+    double smoothingMm, bool simpleMode)
 {
     var byName = LayersByName(layerNames);
     var side = MountSide(c,
@@ -762,12 +782,14 @@ static (bool Ok, string Message) GenerateAssembly(PcbComponent c, Dictionary<int
         return (false, $"This library doesn't define a '{targetName}' layer — nothing to generate onto.");
 
     // A body only counts as usable ground truth once we know its shape one way or another: either a
-    // real STEP model we can project top-down (the accurate case), or a non-degenerate stored Outline
-    // to fall back on for bodies whose model can't be projected (no ModelId, unsupported STEP feature, ...).
+    // real STEP model we can project top-down (the accurate case, skipped entirely in simple mode —
+    // the checkbox exists precisely to fall back to the plain stored Outline this used before STEP
+    // projection existed), or a non-degenerate stored Outline to fall back on otherwise (no ModelId,
+    // unsupported STEP feature, ...).
     var allBodies = c.ComponentBodies.Cast<PcbComponentBody>().ToList();
     var projCache = StepBodyOutline.CreateCache();
     var perBody = allBodies
-        .Select(b => (Body: b, Projected: StepBodyOutline.TryProjectTopDown(b, models, projCache)))
+        .Select(b => (Body: b, Projected: simpleMode ? null : StepBodyOutline.TryProjectTopDown(b, models, projCache, smoothingMm)))
         .Where(x => x.Projected is { Count: > 0 } || x.Body.Outline.Count >= 3)
         .ToList();
 
@@ -787,11 +809,13 @@ static (bool Ok, string Message) GenerateAssembly(PcbComponent c, Dictionary<int
             ? CoordRect.Union(proj.SelectMany(loop => loop).Select(p => new CoordRect(p, p)))
             : x.Body.Bounds));
         var projectedCount = perBody.Count(x => x.Projected is { Count: > 0 });
-        source = projectedCount == perBody.Count
-            ? "STEP model projection"
-            : projectedCount > 0
-                ? $"STEP model projection ({projectedCount}/{perBody.Count} bodies) + stored 3D body outline"
-                : "3D body outline";
+        source = simpleMode
+            ? "3D body outline (simple mode)"
+            : projectedCount == perBody.Count
+                ? "STEP model projection"
+                : projectedCount > 0
+                    ? $"STEP model projection ({projectedCount}/{perBody.Count} bodies) + stored 3D body outline"
+                    : "3D body outline";
     }
     else
     {
@@ -835,14 +859,19 @@ static (bool Ok, string Message) GeneratePin1Indicator(PcbComponent c, Dictionar
 
     // Inscribed inside the pad, not surrounding it — sized off the SMALLER pad dimension so the ring
     // clears every edge (a wide/short pad would otherwise let a width-based radius poke past the top
-    // and bottom), with a floor so a very small pad still gets a visible, non-degenerate ring.
+    // and bottom), with a floor so a very small pad still gets a visible, non-degenerate ring. The
+    // ring is drawn as a centerline arc with its own stroke width, so its ink extends half that width
+    // beyond the center radius — without subtracting that half-width too, the margin only accounted
+    // for the centerline and the visible ring could poke past the intended clearance (or the pad edge
+    // on a small pad).
     var padBounds = pin1.Bounds;
     var minDim = Coord.Min(padBounds.Width, padBounds.Height);
-    var radius = Coord.Max(minDim / 2 - Coord.FromMm(Pin1EdgeMarginMm), Coord.FromMm(0.05));
+    var ringWidth = Coord.FromMm(DrawingLineWidthMm);
+    var radius = Coord.Max(minDim / 2 - Coord.FromMm(Pin1EdgeMarginMm) - ringWidth / 2, Coord.FromMm(0.05));
     c.AddArc(PcbArc.Create()
         .Center(pin1.Location.X, pin1.Location.Y)
         .Radius(radius)
-        .Width(Coord.FromMm(DrawingLineWidthMm))
+        .Width(ringWidth)
         .OnLayer(targetId.Value)
         .FullCircle()
         .Build());
@@ -1056,11 +1085,19 @@ record PrimRef(string PrimKind, int PrimIndex);
 // The multi-primitive reassignment request: every Prims entry moves to the same ToLayer.
 record ReassignManyRequest(string Id, int Index, List<PrimRef> Prims, int ToLayer);
 
-// The courtyard / pin-1 generation request: just the footprint to act on.
+// The pin-1 generation request: just the footprint to act on.
 record GenerateRequest(string Id, int Index);
 
-// The assembly-outline generation request: whether to also add a centered ".Designator" string.
-record GenerateAssemblyRequest(string Id, int Index, bool IncludeDesignator);
+// The courtyard generation request: BodyOffsetMm/PadOffsetMm are the keepout clearances (independent
+// so the body's true offset outline and the pad clearance can differ); SmoothingMm is the STEP-outline
+// simplification tolerance; SimpleMode skips STEP projection entirely and falls back to the plain
+// bounding-box behavior generation used before it existed. Null fields fall back to the Default*Mm
+// constants server-side.
+record GenerateCourtyardRequest(string Id, int Index, double? BodyOffsetMm, double? PadOffsetMm, double? SmoothingMm, bool SimpleMode);
+
+// The assembly-outline generation request: whether to also add a centered ".Designator" string, the
+// STEP-outline simplification tolerance, and whether to skip STEP projection (see SimpleMode above).
+record GenerateAssemblyRequest(string Id, int Index, bool IncludeDesignator, double? SmoothingMm, bool SimpleMode);
 
 // The export request: just the library id — the whole (possibly reassigned) library is serialized.
 record ExportRequest(string Id);
