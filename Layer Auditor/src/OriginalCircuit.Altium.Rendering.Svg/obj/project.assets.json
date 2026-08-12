@@ -114,6 +114,120 @@
           "bin/placeholder/OriginalCircuit.Eda.Rendering.Svg.dll": {}
         }
       }
+    },
+    "net10.0/win-x64": {
+      "Microsoft.Build.Tasks.Git/8.0.0": {
+        "type": "package",
+        "build": {
+          "build/Microsoft.Build.Tasks.Git.props": {},
+          "build/Microsoft.Build.Tasks.Git.targets": {}
+        },
+        "buildMultiTargeting": {
+          "buildMultiTargeting/Microsoft.Build.Tasks.Git.props": {},
+          "buildMultiTargeting/Microsoft.Build.Tasks.Git.targets": {}
+        }
+      },
+      "Microsoft.SourceLink.Common/8.0.0": {
+        "type": "package",
+        "build": {
+          "build/Microsoft.SourceLink.Common.props": {},
+          "build/Microsoft.SourceLink.Common.targets": {}
+        },
+        "buildMultiTargeting": {
+          "buildMultiTargeting/Microsoft.SourceLink.Common.props": {},
+          "buildMultiTargeting/Microsoft.SourceLink.Common.targets": {}
+        }
+      },
+      "Microsoft.SourceLink.GitHub/8.0.0": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Build.Tasks.Git": "8.0.0",
+          "Microsoft.SourceLink.Common": "8.0.0"
+        },
+        "build": {
+          "build/Microsoft.SourceLink.GitHub.props": {},
+          "build/Microsoft.SourceLink.GitHub.targets": {}
+        },
+        "buildMultiTargeting": {
+          "buildMultiTargeting/Microsoft.SourceLink.GitHub.props": {},
+          "buildMultiTargeting/Microsoft.SourceLink.GitHub.targets": {}
+        }
+      },
+      "OpenMcdf/3.1.4": {
+        "type": "package",
+        "compile": {
+          "lib/net10.0/OpenMcdf.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net10.0/OpenMcdf.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "OriginalCircuit.Altium/2.0.0-alpha.1": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "OpenMcdf": "3.1.4"
+        },
+        "compile": {
+          "bin/placeholder/OriginalCircuit.Altium.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/OriginalCircuit.Altium.dll": {}
+        }
+      },
+      "OriginalCircuit.Altium.Rendering.Core/2.0.0-alpha.1": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "OriginalCircuit.Altium": "2.0.0-alpha.1"
+        },
+        "compile": {
+          "bin/placeholder/OriginalCircuit.Altium.Rendering.Core.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/OriginalCircuit.Altium.Rendering.Core.dll": {}
+        }
+      },
+      "OriginalCircuit.Eda.Abstractions/1.0.0-alpha.1": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "compile": {
+          "bin/placeholder/OriginalCircuit.Eda.Abstractions.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/OriginalCircuit.Eda.Abstractions.dll": {}
+        }
+      },
+      "OriginalCircuit.Eda.Rendering.Core/1.0.0-alpha.1": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "OriginalCircuit.Eda.Abstractions": "1.0.0-alpha.1"
+        },
+        "compile": {
+          "bin/placeholder/OriginalCircuit.Eda.Rendering.Core.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/OriginalCircuit.Eda.Rendering.Core.dll": {}
+        }
+      },
+      "OriginalCircuit.Eda.Rendering.Svg/1.0.0-alpha.1": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "OriginalCircuit.Eda.Rendering.Core": "1.0.0-alpha.1"
+        },
+        "compile": {
+          "bin/placeholder/OriginalCircuit.Eda.Rendering.Svg.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/OriginalCircuit.Eda.Rendering.Svg.dll": {}
+        }
+      }
     }
   },
   "libraries": {
@@ -380,6 +494,20 @@
         ],
         "assetTargetFallback": true,
         "warn": true,
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.AspNetCore.App.Runtime.win-x64",
+            "version": "[10.0.10, 10.0.10]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Runtime.win-x64",
+            "version": "[10.0.10, 10.0.10]"
+          },
+          {
+            "name": "Microsoft.WindowsDesktop.App.Runtime.win-x64",
+            "version": "[10.0.10, 10.0.10]"
+          }
+        ],
         "frameworkReferences": {
           "Microsoft.NETCore.App": {
             "privateAssets": "all"
@@ -660,6 +788,11 @@
           "System.Xml.XPath": "(,4.3.32767]",
           "System.Xml.XPath.XDocument": "(,5.0.32767]"
         }
+      }
+    },
+    "runtimes": {
+      "win-x64": {
+        "#import": []
       }
     }
   }

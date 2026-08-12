@@ -22454,8 +22454,19 @@
         </member>
         <member name="M:OriginalCircuit.Altium.Serialization.Writers.WriterUtilities.GetSectionKeyFromName(System.String)">
             <summary>
-            Converts a component name to a compound file storage key by truncating to 31 chars
-            and replacing '/' with '_'.
+            Converts a component name to a compound file storage key by truncating to 31 chars and
+            replacing every character OpenMcdf's writer rejects ('\', '/', ':', '!') with '_'.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Serialization.Writers.WriterUtilities.SanitizeSectionKey(System.String)">
+            <summary>
+            Replaces every character OpenMcdf's writer rejects ('\', '/', ':', '!') with '_'. Applied both
+            to freshly-generated keys (see <see cref="M:OriginalCircuit.Altium.Serialization.Writers.WriterUtilities.GetSectionKeyFromName(System.String)"/>) and to section keys
+            preserved from a prior read (<c>PcbLibrary.SectionKeys</c>/<c>SchLibrary.SectionKeys</c>) --
+            those can legitimately contain them too (real Altium-authored files sometimes do; OpenMcdf's
+            own restriction is stricter than the actual format), and there is no way to re-create an entry
+            with the exact original name in that case either, so the key must be re-mangled the same way
+            on every write regardless of where it came from.
             </summary>
         </member>
         <member name="T:OriginalCircuit.Altium.Generators.AltiumParameterAttribute">
