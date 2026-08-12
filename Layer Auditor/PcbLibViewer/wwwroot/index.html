@@ -110,7 +110,17 @@ aside.report{border-right:none; border-left:1px solid var(--line)}
 .layer .name{flex:1; font-size:11.5px; letter-spacing:.03em; color:var(--ink-dim)}
 .layer input:checked ~ .name{color:var(--ink)}
 .layer .dot{width:8px;height:8px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.4)}
-.layer-toolbar{display:flex; gap:8px; margin-bottom:10px}
+
+/* Legal Layers list row: the "legal" checkbox (.layer, as above) plus a second, independent
+   "show in reassignment dropdowns" checkbox — two separate click targets, so no longer one big
+   label for the whole row. */
+.legal-row{display:flex; align-items:center; gap:8px}
+.legal-row .layer{flex:1; padding:6px 0}
+.mini-cb{display:flex; cursor:pointer; flex:none}
+.mini-cb input{appearance:none; width:15px; height:15px; border-radius:4px; border:1px solid var(--line2); background:var(--panel2); flex:none; position:relative; cursor:pointer; transition:.15s}
+.mini-cb.dropdown-cb input:checked{background:var(--phos); border-color:var(--phos)}
+.mini-cb.dropdown-cb input:checked::after{content:""; position:absolute; left:4px; top:1px; width:4px; height:8px; border:solid #0a2015; border-width:0 2px 2px 0; transform:rotate(45deg)}
+.layer-toolbar{display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap}
 .layer-toolbar button{
   appearance:none; border:1px solid var(--line2); background:var(--panel2); color:var(--ink-dim);
   font-family:inherit; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; padding:5px 9px;
@@ -278,6 +288,10 @@ body.dragging .drop .ring{border-color:var(--copper); box-shadow:0 0 40px rgba(2
         <div class="layer-toolbar">
           <button id="legalAllOn">All legal</button>
           <button id="legalAllOff">All illegal</button>
+        </div>
+        <div class="layer-toolbar">
+          <button id="dropdownAllOn">Show all in dropdown</button>
+          <button id="dropdownAllOff">Hide all from dropdown</button>
         </div>
         <div id="legalLayers"><div class="empty-list">Load a library to see the layers it uses.</div></div>
         <button class="btn" id="genReportBtn" disabled>
@@ -457,6 +471,8 @@ $('#allOn').onclick = ()=>setAllLayers(true);
 $('#allOff').onclick = ()=>setAllLayers(false);
 $('#legalAllOn').onclick = ()=>setAllLegal(true);
 $('#legalAllOff').onclick = ()=>setAllLegal(false);
+$('#dropdownAllOn').onclick = ()=>setAllDropdownVisible(true);
+$('#dropdownAllOff').onclick = ()=>setAllDropdownVisible(false);
 $('#genReportBtn').onclick = generateReport;
 $('#copyReportBtn').onclick = copyReport;
 $('#downloadReportBtn').onclick = downloadReport;
@@ -554,7 +570,7 @@ async function render(){
   setStatus('busy','rendering…'); stage.classList.add('busy');
   try{
     const res=await fetch('/api/render.svg',{method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({id:state.id, index:state.selected})});
+      body:JSON.stringify({id:state.id, index:state.selected, legalLayers:Object.keys(state.legal||{}).filter(id=>state.legal[id]).map(Number)})});
     if(seq!==renderSeq) return;
     if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error||'render failed'); }
     const data=await res.json();
@@ -576,6 +592,13 @@ function buildLayerList(layers){
   state.layers={};
   layers.forEach(l=>{ state.layers[l.id]=true; });
   const box=$('#layers');
+
+  // buildLayerList replaces box.innerHTML wholesale on every render (including after moving a
+  // primitive, which calls render() again) — capture each collapsible group's current open/closed
+  // state BEFORE that happens so re-rendering doesn't silently re-expand something the user closed.
+  const wasOpen={};
+  box.querySelectorAll('details.layer-group[data-group]').forEach(d=>{ wasOpen[d.dataset.group]=d.open; });
+  const isOpen=(key, def=true)=> key in wasOpen ? wasOpen[key] : def;
 
   // Layers the library defines somewhere but that have nothing on THIS footprint yet — still worth
   // listing so a target for splitting a compounded primitive is visible even before anything uses it.
@@ -623,11 +646,10 @@ function buildLayerList(layers){
     </div>`;
   }).join('');
 
-  const emptyRows = emptyLayers.length ? `<details class="layer-group" open><summary>Defined, unused on this footprint <span class="cnt">(${emptyLayers.length})</span></summary>` +
-    emptyLayers.map(l => {
-      const layerWarnings=warnByLayer[l.id]||[];
-      const notes = layerWarnings.length ? `<div class="warn-notes">${layerWarnings.map(w=>escapeHtml(w.message)).join('<br>')}</div>` : '';
-      return `
+  const emptyEntryHtml = l => {
+    const layerWarnings=warnByLayer[l.id]||[];
+    const notes = layerWarnings.length ? `<div class="warn-notes">${layerWarnings.map(w=>escapeHtml(w.message)).join('<br>')}</div>` : '';
+    return `
     <div class="layer-entry empty-entry${layerWarnings.length?' has-warning':''}" data-layer="${l.id}">
       <div class="layer">
         <span class="empty-badge">empty</span>
@@ -637,7 +659,18 @@ function buildLayerList(layers){
       </div>
       ${notes}
     </div>`;
-    }).join('') + `</details>` : '';
+  };
+  const emptyGroup = (key, label, list) => list.length
+    ? `<details class="layer-group" data-group="${key}" ${isOpen(key)?'open':''}><summary>${label} <span class="cnt">(${list.length})</span></summary>${list.map(emptyEntryHtml).join('')}</details>`
+    : '';
+
+  // Split so collapsing the "not legal" group (usually the noisier, less useful one — mechanical
+  // layers nobody's confirmed yet) never hides the legal ones too; each group collapses on its own.
+  const emptyLegal = emptyLayers.filter(l=>state.legal[l.id]);
+  const emptyNotLegal = emptyLayers.filter(l=>!state.legal[l.id]);
+  const emptyRows =
+    emptyGroup('unused-legal', 'Defined, unused — legal', emptyLegal) +
+    emptyGroup('unused-notlegal', 'Defined, unused — not legal', emptyNotLegal);
 
   box.innerHTML = usedRows + emptyRows;
   box.querySelectorAll('.layer-entry').forEach(entry=>{
@@ -659,20 +692,29 @@ function applyIllegalBadges(){
   });
 }
 
-// Options for a reassignment target dropdown: every layer currently marked legal.
+// A layer the user has explicitly hidden from reassignment dropdowns (the second checkbox in the
+// Legal Layers list) never appears as a target, regardless of legal state — checked in both
+// legalLayerOptions and allLayerOptions below. Defaults to shown (true) for a layer id not yet in
+// the map, so this only ever hides something the user actively unchecked.
+function inDropdown(id){ return state.dropdownVisible[id]!==false; }
+
+// Options for a reassignment target dropdown: every layer currently marked legal (and not hidden
+// from dropdowns).
 function legalLayerOptions(){
   return state.libraryLayers
-    .filter(l=>state.legal[l.id])
+    .filter(l=>state.legal[l.id] && inDropdown(l.id))
     .map(l=>`<option value="${l.id}">${escapeHtml(l.name)}</option>`)
     .join('');
 }
 
-// Options for a reassignment target dropdown: every layer the library defines, used or not — for
-// content-warning-driven and manual per-primitive reassignment, which aren't restricted to the
-// "legal" set the way bulk audit-driven reassignment is: the correct destination (e.g. Top 3D Body)
-// may well not be marked legal yet, so restricting to legalLayerOptions() would hide it.
+// Options for a reassignment target dropdown: every layer the library defines, used or not (and not
+// hidden from dropdowns) — for content-warning-driven and manual per-primitive reassignment, which
+// aren't restricted to the "legal" set the way bulk audit-driven reassignment is: the correct
+// destination (e.g. Top 3D Body) may well not be marked legal yet, so restricting to
+// legalLayerOptions() would hide it.
 function allLayerOptions(){
   return state.libraryLayers
+    .filter(l=>inDropdown(l.id))
     .map(l=>`<option value="${l.id}">${escapeHtml(l.name)}</option>`)
     .join('');
 }
@@ -700,20 +742,29 @@ function setAllLayers(on){
 // mismatches happen — so they default to illegal until the user confirms them.
 function buildLegalLayersList(){
   state.legal={};
+  state.dropdownVisible={};
   const box=$('#legalLayers');
   if(!state.libraryLayers.length){
     box.innerHTML='<div class="empty-list">This library has no drawable primitives.</div>';
     $('#genReportBtn').disabled=true;
     return;
   }
-  state.libraryLayers.forEach(l=>{ state.legal[l.id]=!l.mechanical; });
+  state.libraryLayers.forEach(l=>{ state.legal[l.id]=!l.mechanical; state.dropdownVisible[l.id]=true; });
 
+  // Two independent checkboxes per layer: "legal" (used by the illegal-layer audit) and "show this
+  // layer in reassignment dropdowns" — no longer one label for the whole row, since each checkbox
+  // needs its own click target.
   const row = l => `
-    <label class="layer" data-layer="${l.id}">
-      <input type="checkbox" ${state.legal[l.id]?'checked':''}>
-      <span class="name">${escapeHtml(l.name)}</span>
-      <span class="dot" style="background:${l.color}"></span>
-    </label>`;
+    <div class="legal-row" data-layer="${l.id}">
+      <label class="layer" title="Legal layer (used by the illegal-layer audit)">
+        <input type="checkbox" class="legal-check" ${state.legal[l.id]?'checked':''}>
+        <span class="name">${escapeHtml(l.name)}</span>
+        <span class="dot" style="background:${l.color}"></span>
+      </label>
+      <label class="mini-cb dropdown-cb" title="Show this layer in reassignment dropdowns">
+        <input type="checkbox" class="dropdown-check" ${state.dropdownVisible[l.id]?'checked':''}>
+      </label>
+    </div>`;
   const standard=state.libraryLayers.filter(l=>!l.mechanical);
   const mechanical=state.libraryLayers.filter(l=>l.mechanical);
 
@@ -722,8 +773,12 @@ function buildLegalLayersList(){
     (mechanical.length? `<details class="layer-group" open><summary>Mechanical <span class="cnt">(${mechanical.length})</span></summary>${mechanical.map(row).join('')}</details>` : '');
 
   box.querySelectorAll('[data-layer]').forEach(el=>{
-    el.querySelector('input').addEventListener('change', e=>{
+    el.querySelector('.legal-check').addEventListener('change', e=>{
       state.legal[el.dataset.layer]=e.target.checked;
+      refreshContentWarnings();
+    });
+    el.querySelector('.dropdown-check').addEventListener('change', e=>{
+      state.dropdownVisible[el.dataset.layer]=e.target.checked;
       refreshLayerList();
     });
   });
@@ -740,9 +795,30 @@ function refreshLayerList(){
   if(state.lastLayers) buildLayerList(state.lastLayers);
 }
 
+// Legal-set changes affect more than the client-side badges: ContentWarnings' name-based layer
+// resolution (a duplicate name like "Top Courtyard" shared by two ids) picks a different winner once a
+// layer's legal flag flips, so the warnings themselves have to be recomputed server-side — a plain
+// refreshLayerList() would just redraw the same stale, pre-toggle warnings. Uses /api/content-warnings
+// rather than /api/render.svg so pan/zoom aren't disturbed.
+async function refreshContentWarnings(){
+  if(!state.id || state.selected<0){ refreshLayerList(); return; }
+  try{
+    const res=await fetch('/api/content-warnings',{method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:state.id, index:state.selected, legalLayers:Object.keys(state.legal||{}).filter(id=>state.legal[id]).map(Number)})});
+    if(res.ok){ const data=await res.json(); state.lastContentWarnings=data.contentWarnings||[]; }
+  }catch(e){ /* keep the previous warnings if this fails; the badges just won't be fully up to date */ }
+  refreshLayerList();
+}
+
 function setAllLegal(on){
   for(const id in state.legal) state.legal[id]=on;
-  document.querySelectorAll('#legalLayers input[type=checkbox]').forEach(cb=>cb.checked=on);
+  document.querySelectorAll('#legalLayers .legal-check').forEach(cb=>cb.checked=on);
+  refreshContentWarnings();
+}
+
+function setAllDropdownVisible(on){
+  for(const id in state.dropdownVisible) state.dropdownVisible[id]=on;
+  document.querySelectorAll('#legalLayers .dropdown-check').forEach(cb=>cb.checked=on);
   refreshLayerList();
 }
 
@@ -853,7 +929,9 @@ async function generateDrawing(kind){
   if(!state.id || state.selected<0) return;
   setStatus('busy','generating…');
   try{
-    const body = {id:state.id, index:state.selected};
+    // Sent so the server can prefer the layer marked legal when a name like "Top Courtyard" is
+    // ambiguous (two different layer ids sharing it) — see LayersByName server-side.
+    const body = {id:state.id, index:state.selected, legalLayers:Object.keys(state.legal||{}).filter(id=>state.legal[id]).map(Number)};
     if(kind==='courtyard'){
       body.bodyOffsetMm = +$('#cyBodyOffset').value;
       body.padOffsetMm = +$('#cyPadOffset').value;

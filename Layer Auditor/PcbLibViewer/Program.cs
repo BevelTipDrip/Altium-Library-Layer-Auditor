@@ -184,9 +184,26 @@ app.MapPost("/api/render.svg", async (RenderRequest req, LibraryCache cache, Can
     // Content-sanity warnings for THIS footprint — computed live on every render (not gated behind the
     // library-wide "Generate Report" button) so the Layers panel can reveal a reassignment dropdown for
     // a flagged layer/kind the same way an illegal-layer flag does, as soon as the footprint is opened.
-    var contentWarnings = ContentWarnings(component, layerNames);
+    var contentWarnings = ContentWarnings(component, layerNames, new HashSet<int>(req.LegalLayers ?? new List<int>()));
 
     return Results.Json(new { svg = svgText, layers, contentWarnings });
+});
+
+// Content warnings only, no SVG re-render — the Legal Layers checklist calls this whenever the legal
+// set changes so ContentWarnings' name-based resolution can be recomputed against the new set (a
+// duplicate-name ambiguity resolves differently once a layer's legal flag flips), without the pan/zoom
+// reset a full /api/render.svg round-trip would cause.
+app.MapPost("/api/content-warnings", (ContentWarningsRequest req, LibraryCache cache) =>
+{
+    var entry = cache.Get(req.Id);
+    if (entry is null) return Results.NotFound(new { error = "Library not found — re-upload it." });
+    var (_, components, layerNames, _) = entry.Value;
+    if (req.Index < 0 || req.Index >= components.Count)
+        return Results.BadRequest(new { error = "Footprint index out of range." });
+
+    var component = components[req.Index];
+    var contentWarnings = ContentWarnings(component, layerNames, new HashSet<int>(req.LegalLayers ?? new List<int>()));
+    return Results.Json(new { contentWarnings });
 });
 
 // ── Audit report: components with primitives/3D bodies on layers not in the "legal" set, PLUS
@@ -220,7 +237,7 @@ app.MapPost("/api/report", (ReportRequest req, LibraryCache cache) =>
             .Select(g => new { layerId = g.Key.Layer, layerName = NameOf(g.Key.Layer), kind = g.Key.Kind, count = g.Count() })
             .OrderBy(i => i.layerId).ThenBy(i => i.kind)
             .ToList();
-        var warnings = ContentWarnings(component, layerNames);
+        var warnings = ContentWarnings(component, layerNames, legal);
 
         if (issues.Count == 0 && warnings.Count == 0) continue;
 
@@ -350,7 +367,7 @@ app.MapPost("/api/generate/courtyard", (GenerateCourtyardRequest req, LibraryCac
 
     var (ok, message) = GenerateCourtyard(components[req.Index], layerNames, library.Models,
         req.BodyOffsetMm ?? DefaultBodyOffsetMm, req.PadOffsetMm ?? DefaultPadOffsetMm,
-        req.SmoothingMm ?? DefaultSmoothingMm, req.SimpleMode);
+        req.SmoothingMm ?? DefaultSmoothingMm, req.SimpleMode, new HashSet<int>(req.LegalLayers ?? new List<int>()));
     return Results.Json(new { ok, message });
 });
 
@@ -368,7 +385,7 @@ app.MapPost("/api/generate/assembly", (GenerateAssemblyRequest req, LibraryCache
         return Results.BadRequest(new { error = "Footprint index out of range." });
 
     var (ok, message) = GenerateAssembly(components[req.Index], layerNames, req.IncludeDesignator, library.Models,
-        req.SmoothingMm ?? DefaultSmoothingMm, req.SimpleMode);
+        req.SmoothingMm ?? DefaultSmoothingMm, req.SimpleMode, new HashSet<int>(req.LegalLayers ?? new List<int>()));
     return Results.Json(new { ok, message });
 });
 
@@ -383,7 +400,7 @@ app.MapPost("/api/generate/pin1", (GenerateRequest req, LibraryCache cache) =>
     if (req.Index < 0 || req.Index >= components.Count)
         return Results.BadRequest(new { error = "Footprint index out of range." });
 
-    var (ok, message) = GeneratePin1Indicator(components[req.Index], layerNames);
+    var (ok, message) = GeneratePin1Indicator(components[req.Index], layerNames, new HashSet<int>(req.LegalLayers ?? new List<int>()));
     return Results.Json(new { ok, message });
 });
 
@@ -566,12 +583,34 @@ static IEnumerable<(int Layer, string Kind)> AuditEntries(PcbComponent c)
 // Altium's Mechanical Layer Editor "Layer Type" field) back to their numeric id, for the content
 // checks below. Ids vary per library, but a footprint author who assigned a layer that Type expects
 // it to be called exactly that in every library that follows the convention.
-static Dictionary<string, int> LayersByName(Dictionary<int, string> layerNames)
+// legalLayers: when a name is ambiguous (a library where two different layer ids share the same
+// name — e.g. someone renamed a layer without noticing another already had that name), prefer
+// whichever candidate is currently marked legal, so name-based resolution lands on the layer the
+// user actually curated rather than an arbitrary same-named one. If NONE of the candidates are legal
+// yet (including the common case of a brand-new upload, before the user has touched the Legal Layers
+// checklist at all — every mechanical layer starts out unmarked), the name is left unresolved rather
+// than guessing: picking an arbitrary duplicate was exactly what produced spurious "is empty" content
+// warnings and wrong-layer generation targets on the *other*, correct duplicate. A non-ambiguous name
+// (only one id has it) always resolves regardless of legal state — there's nothing to disambiguate.
+static Dictionary<string, int> LayersByName(Dictionary<int, string> layerNames, HashSet<int>? legalLayers = null)
 {
-    var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    var byNameAll = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
     foreach (var (id, name) in layerNames)
-        if (!string.IsNullOrWhiteSpace(name) && !map.ContainsKey(name.Trim()))
-            map[name.Trim()] = id;
+    {
+        if (string.IsNullOrWhiteSpace(name)) continue;
+        var key = name.Trim();
+        if (!byNameAll.TryGetValue(key, out var ids)) byNameAll[key] = ids = new List<int>();
+        ids.Add(id);
+    }
+
+    var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    foreach (var (name, ids) in byNameAll)
+    {
+        var preferred = legalLayers is null ? 0 : ids.FirstOrDefault(legalLayers.Contains);
+        if (preferred != 0) map[name] = preferred;
+        else if (ids.Count == 1) map[name] = ids[0];
+        // else: ambiguous and no legal candidate identified — leave unresolved.
+    }
     return map;
 }
 
@@ -581,9 +620,9 @@ static Dictionary<string, int> LayersByName(Dictionary<int, string> layerNames)
 // courtyard/assembly outline. Keyed off the conventional names above rather than raw ids; a check is
 // skipped entirely (not flagged) if the library never named the corresponding layer, since there's
 // nothing to check against.
-static List<ContentWarning> ContentWarnings(PcbComponent c, Dictionary<int, string> layerNames)
+static List<ContentWarning> ContentWarnings(PcbComponent c, Dictionary<int, string> layerNames, HashSet<int>? legalLayers = null)
 {
-    var byName = LayersByName(layerNames);
+    var byName = LayersByName(layerNames, legalLayers);
     var warnings = new List<ContentWarning>();
     int? IdOf(string name) => byName.TryGetValue(name, out var id) ? id : null;
 
@@ -706,18 +745,27 @@ static string? MountSide(PcbComponent c, int? topBody, int? bottomBody)
 static int? TargetLayer(Dictionary<string, int> byName, string? side, string topName, string bottomName) =>
     byName.TryGetValue(side == "bottom" ? bottomName : topName, out var id) ? id : null;
 
+// A target name can come back unresolved from LayersByName for two different reasons — the library
+// genuinely has no layer with that name, or it has more than one (a duplicate) and none is marked
+// legal yet. Worth telling apart: the second case has a fix (mark the right one legal), the first
+// doesn't.
+static string LayerNotFoundMessage(Dictionary<int, string> layerNames, string targetName) =>
+    layerNames.Values.Count(v => string.Equals(v?.Trim(), targetName, StringComparison.OrdinalIgnoreCase)) > 1
+        ? $"Multiple layers are named '{targetName}' and none are marked legal yet — mark the correct one legal in the Legal Layers panel, then try again."
+        : $"This library doesn't define a '{targetName}' layer — nothing to generate onto.";
+
 static (bool Ok, string Message) GenerateCourtyard(
     PcbComponent c, Dictionary<int, string> layerNames, List<PcbModel> models,
-    double bodyOffsetMm, double padOffsetMm, double smoothingMm, bool simpleMode)
+    double bodyOffsetMm, double padOffsetMm, double smoothingMm, bool simpleMode, HashSet<int> legalLayers)
 {
-    var byName = LayersByName(layerNames);
+    var byName = LayersByName(layerNames, legalLayers);
     var side = MountSide(c,
         byName.TryGetValue("Top 3D Body", out var tb) ? tb : null,
         byName.TryGetValue("Bottom 3D Body", out var bb) ? bb : null);
     var targetName = side == "bottom" ? "Bottom Courtyard" : "Top Courtyard";
     var targetId = TargetLayer(byName, side, "Top Courtyard", "Bottom Courtyard");
     if (targetId is null)
-        return (false, $"This library doesn't define a '{targetName}' layer — nothing to generate onto.");
+        return (false, LayerNotFoundMessage(layerNames, targetName));
 
     var bodyOffset = Coord.FromMm(bodyOffsetMm);
     var bodies = c.ComponentBodies.Cast<PcbComponentBody>().Where(b => !b.Bounds.IsEmpty).ToList();
@@ -777,16 +825,16 @@ static (bool Ok, string Message) GenerateCourtyard(
 
 static (bool Ok, string Message) GenerateAssembly(
     PcbComponent c, Dictionary<int, string> layerNames, bool includeDesignator, List<PcbModel> models,
-    double smoothingMm, bool simpleMode)
+    double smoothingMm, bool simpleMode, HashSet<int> legalLayers)
 {
-    var byName = LayersByName(layerNames);
+    var byName = LayersByName(layerNames, legalLayers);
     var side = MountSide(c,
         byName.TryGetValue("Top 3D Body", out var tb) ? tb : null,
         byName.TryGetValue("Bottom 3D Body", out var bb) ? bb : null);
     var targetName = side == "bottom" ? "Bottom Assembly" : "Top Assembly";
     var targetId = TargetLayer(byName, side, "Top Assembly", "Bottom Assembly");
     if (targetId is null)
-        return (false, $"This library doesn't define a '{targetName}' layer — nothing to generate onto.");
+        return (false, LayerNotFoundMessage(layerNames, targetName));
 
     // A body only counts as usable ground truth once we know its shape one way or another: either a
     // real STEP model we can project top-down (the accurate case, skipped entirely in simple mode —
@@ -849,20 +897,20 @@ static (bool Ok, string Message) GenerateAssembly(
     return (true, $"Generated {targetName} from {source}: {segCount} segment(s) across {loops.Count} outline(s){extra}, replacing {cleared} old item(s).");
 }
 
-static (bool Ok, string Message) GeneratePin1Indicator(PcbComponent c, Dictionary<int, string> layerNames)
+static (bool Ok, string Message) GeneratePin1Indicator(PcbComponent c, Dictionary<int, string> layerNames, HashSet<int> legalLayers)
 {
     var pin1 = c.Pads.Cast<PcbPad>().FirstOrDefault(p => (p.Designator ?? "").Trim() == "1");
     if (pin1 is null)
         return (false, "No pad numbered '1' found — nothing to mark.");
 
-    var byName = LayersByName(layerNames);
+    var byName = LayersByName(layerNames, legalLayers);
     var side = MountSide(c,
         byName.TryGetValue("Top 3D Body", out var tb) ? tb : null,
         byName.TryGetValue("Bottom 3D Body", out var bb) ? bb : null);
     var targetName = side == "bottom" ? "Bottom Assembly" : "Top Assembly";
     var targetId = TargetLayer(byName, side, "Top Assembly", "Bottom Assembly");
     if (targetId is null)
-        return (false, $"This library doesn't define a '{targetName}' layer — nothing to generate onto.");
+        return (false, LayerNotFoundMessage(layerNames, targetName));
 
     // Inscribed inside the pad, not surrounding it — sized off the SMALLER pad dimension so the ring
     // clears every edge (a wide/short pad would otherwise let a width-based radius poke past the top
@@ -1070,8 +1118,15 @@ static List<CoordPoint> SimplifyCollinear(List<CoordPoint> pts)
 // null when the fix isn't a reassignment (nothing missing has anywhere to reassign FROM).
 record ContentWarning(string Message, int? LayerId, string? Kind);
 
-// The render request sent by the front-end.
-record RenderRequest(string Id, int Index, int? Width, int? Height);
+// The render request sent by the front-end. LegalLayers (the same checked set the audit report and
+// generation endpoints use) lets ContentWarnings' name-based layer resolution prefer the layer the
+// user actually marked legal when a name like "Top Courtyard" is ambiguous (two ids sharing it) —
+// otherwise an unused, not-legal duplicate could get flagged "empty" instead of the real one.
+record RenderRequest(string Id, int Index, int? Width, int? Height, List<int>? LegalLayers);
+
+// The content-warnings-only request sent whenever the Legal Layers checklist changes (see
+// /api/content-warnings above) — same idea as RenderRequest but without the SVG-only Width/Height.
+record ContentWarningsRequest(string Id, int Index, List<int>? LegalLayers);
 
 // The audit-report request sent by the front-end: which layer IDs the user has marked legal.
 record ReportRequest(string Id, List<int>? LegalLayers);
@@ -1092,19 +1147,25 @@ record PrimRef(string PrimKind, int PrimIndex);
 // The multi-primitive reassignment request: every Prims entry moves to the same ToLayer.
 record ReassignManyRequest(string Id, int Index, List<PrimRef> Prims, int ToLayer);
 
-// The pin-1 generation request: just the footprint to act on.
-record GenerateRequest(string Id, int Index);
+// The pin-1 generation request: the footprint to act on, plus which layer ids the user currently
+// has marked legal (see GenerateCourtyardRequest's remark — same reason all three generation
+// requests carry this).
+record GenerateRequest(string Id, int Index, List<int>? LegalLayers);
 
 // The courtyard generation request: BodyOffsetMm/PadOffsetMm are the keepout clearances (independent
 // so the body's true offset outline and the pad clearance can differ); SmoothingMm is the STEP-outline
 // simplification tolerance; SimpleMode skips STEP projection entirely and falls back to the plain
 // bounding-box behavior generation used before it existed. Null fields fall back to the Default*Mm
-// constants server-side.
-record GenerateCourtyardRequest(string Id, int Index, double? BodyOffsetMm, double? PadOffsetMm, double? SmoothingMm, bool SimpleMode);
+// constants server-side. LegalLayers is the same set the audit report uses (checked layer ids from
+// the frontend's Legal Layers list) -- needed because a library can have two different layer ids
+// sharing the same name (e.g. "Top Courtyard"); when that happens, name-based target resolution
+// prefers whichever one is marked legal instead of an arbitrary same-named layer (see LayersByName).
+record GenerateCourtyardRequest(string Id, int Index, double? BodyOffsetMm, double? PadOffsetMm, double? SmoothingMm, bool SimpleMode, List<int>? LegalLayers);
 
 // The assembly-outline generation request: whether to also add a centered ".Designator" string, the
-// STEP-outline simplification tolerance, and whether to skip STEP projection (see SimpleMode above).
-record GenerateAssemblyRequest(string Id, int Index, bool IncludeDesignator, double? SmoothingMm, bool SimpleMode);
+// STEP-outline simplification tolerance, whether to skip STEP projection (see SimpleMode above), and
+// LegalLayers (see GenerateCourtyardRequest's remark).
+record GenerateAssemblyRequest(string Id, int Index, bool IncludeDesignator, double? SmoothingMm, bool SimpleMode, List<int>? LegalLayers);
 
 // The export request: just the library id — the whole (possibly reassigned) library is serialized.
 record ExportRequest(string Id);

@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyCopyrightAttribute("Copyright 2020-2026 Original Circuit Limited")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("2.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.0.0-alpha.1+5d159b715663730d394ab8fc8e7b09ff238ee44f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.0.0-alpha.1+16ccc7295b159f3d3b5936fe6716db769c185c95")]
 [assembly: System.Reflection.AssemblyProductAttribute("OriginalCircuit.Altium.Generators")]
 [assembly: System.Reflection.AssemblyTitleAttribute("OriginalCircuit.Altium.Generators")]
 [assembly: System.Reflection.AssemblyVersionAttribute("2.0.0.0")]

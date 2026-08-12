@@ -3,7 +3,8 @@
     "allow": [
       "Read(//c/Users/Ty/AppData/Local/Temp/claude/c--Users-Ty-Documents-Altium-Library-Layer-Auditor/b92b96a8-9833-481d-9fbe-11c92e0688b2/scratchpad/LayerProbe5/**)",
       "Bash(ALTIUMSHARP_DEBUG_TRACK=1 dotnet run -c Release -- \"/c/Users/Ty/Documents/Altium Library Layer Auditor/pcb layer test lib.PcbLib\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(taskkill //F //IM PcbLibViewer.exe)"
     ]
   }
 }
