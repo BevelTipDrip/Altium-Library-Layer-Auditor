@@ -28,10 +28,26 @@ internal sealed class CompoundStorage
     /// </summary>
     public bool TryGetStream(string name, out CompoundStream stream)
     {
-        if (_storage.TryGetEntryInfo(name, out var info) && info.Type == EntryType.Stream)
+        try
         {
-            stream = new CompoundStream(_storage, name);
-            return true;
+            if (_storage.TryGetEntryInfo(name, out var info) && info.Type == EntryType.Stream)
+            {
+                stream = new CompoundStream(_storage, name);
+                return true;
+            }
+        }
+        catch (ArgumentException) when (name is not null)
+        {
+            // OpenMcdf validates the *name* argument on every lookup, not just when creating a new
+            // entry -- rejecting '\', '/', ':', '!', or a name whose UTF-16 encoding exceeds its
+            // directory-entry field, restrictions the real CFB/OLE format itself doesn't impose (only
+            // a NUL byte and the 31-UTF-16-unit length cap are actually part of the spec). Real
+            // Altium-authored libraries do sometimes contain entries named this way (confirmed against
+            // a user-supplied library where ~75% of a large organization's .PcbLibs hit this). Treat
+            // it the same as a genuinely missing entry -- there is no name-independent way to open it
+            // through OpenMcdf's public API -- so the rest of the library still loads instead of the
+            // whole upload failing on one unreachable stream. (`name is not null` re-throws a genuine
+            // ArgumentNullException from a null name, which would be a bug in our own calling code.)
         }
 
         stream = null!;
@@ -57,10 +73,18 @@ internal sealed class CompoundStorage
     /// </summary>
     public bool TryGetStorage(string name, out CompoundStorage storage)
     {
-        if (_storage.TryOpenStorage(name, out var child))
+        try
         {
-            storage = new CompoundStorage(child);
-            return true;
+            if (_storage.TryOpenStorage(name, out var child))
+            {
+                storage = new CompoundStorage(child);
+                return true;
+            }
+        }
+        catch (ArgumentException) when (name is not null)
+        {
+            // See TryGetStream's remark: OpenMcdf rejects some real, on-disk entry names outright on
+            // lookup, not just on creation. Treat that the same as "not found".
         }
 
         storage = null!;
@@ -77,7 +101,9 @@ internal sealed class CompoundStorage
     /// Gets a child storage by name; throws if it does not exist.
     /// </summary>
     public CompoundStorage GetStorage(string name)
-        => new(_storage.OpenStorage(name));
+        => TryGetStorage(name, out var storage)
+            ? storage
+            : throw new KeyNotFoundException($"Storage '{name}' not found.");
 
     /// <summary>
     /// Creates a new child stream. The stream content is written via <see cref="CompoundStream.SetData"/>.

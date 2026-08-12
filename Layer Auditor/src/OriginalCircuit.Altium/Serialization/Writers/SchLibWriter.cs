@@ -137,11 +137,13 @@ public sealed class SchLibWriter
 
     private static void WriteSectionKeys(CompoundFileAccessor cf, SchLibrary library, Dictionary<string, string> sectionKeys)
     {
-        // Use preserved section keys if available
+        // Use preserved section keys if available. Re-sanitized the same as freshly-generated ones --
+        // see PcbLibWriter.WriteSectionKeys / WriterUtilities.SanitizeSectionKey for why a key read
+        // from the original file can't just be reused verbatim either.
         if (library.SectionKeys != null && library.SectionKeys.Count > 0)
         {
             foreach (var kvp in library.SectionKeys)
-                sectionKeys[kvp.Key] = kvp.Value;
+                sectionKeys[kvp.Key] = WriterUtilities.SanitizeSectionKey(kvp.Value);
         }
 
         // Build section keys for components that need them

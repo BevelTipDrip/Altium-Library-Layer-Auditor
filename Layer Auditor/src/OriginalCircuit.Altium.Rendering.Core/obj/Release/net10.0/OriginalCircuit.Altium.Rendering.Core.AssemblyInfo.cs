@@ -15,7 +15,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCopyrightAttribute("Copyright 2020-2026 Original Circuit Limited")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("Core rendering abstractions for Altium Designer file visualization")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("2.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.0.0-alpha.1+0d1034d95089b9c7348f3a25cebad044940303e4")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.0.0-alpha.1+c653ac3fc2570c716b6d28103889c26f9ea9d58f")]
 [assembly: System.Reflection.AssemblyProductAttribute("OriginalCircuit.Altium.Rendering.Core")]
 [assembly: System.Reflection.AssemblyTitleAttribute("OriginalCircuit.Altium.Rendering.Core")]
 [assembly: System.Reflection.AssemblyVersionAttribute("2.0.0.0")]

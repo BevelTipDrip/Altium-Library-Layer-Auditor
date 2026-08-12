@@ -10,6 +10,7 @@
         "dependencies": {
           "OriginalCircuit.Altium": "2.0.0-alpha.1",
           "OriginalCircuit.Altium.Rendering.Core": "2.0.0-alpha.1",
+          "OriginalCircuit.Altium.Rendering.Step": "2.0.0-alpha.1",
           "OriginalCircuit.Altium.Rendering.Svg": "2.0.0-alpha.1",
           "OriginalCircuit.Eda.Abstractions": "1.0.0-alpha.1",
           "OriginalCircuit.Eda.Rendering.Core": "1.0.0-alpha.1"
@@ -43,6 +44,17 @@
         },
         "runtime": {
           "OriginalCircuit.Altium.Rendering.Core.dll": {
+            "assemblyVersion": "2.0.0.0",
+            "fileVersion": "2.0.0.0"
+          }
+        }
+      },
+      "OriginalCircuit.Altium.Rendering.Step/2.0.0-alpha.1": {
+        "dependencies": {
+          "OriginalCircuit.Altium": "2.0.0-alpha.1"
+        },
+        "runtime": {
+          "OriginalCircuit.Altium.Rendering.Step.dll": {
             "assemblyVersion": "2.0.0.0",
             "fileVersion": "2.0.0.0"
           }
@@ -85,6 +97,54 @@
             "fileVersion": "1.0.0.0"
           }
         }
+      },
+      "OriginalCircuit.Mech.STEP.Geometry/1.0.0.0": {
+        "runtime": {
+          "OriginalCircuit.Mech.STEP.Geometry.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "OriginalCircuit.Mech.STEP.Schema/1.0.0.0": {
+        "runtime": {
+          "OriginalCircuit.Mech.STEP.Schema.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "OriginalCircuit.Mech.STEP.Tessellation/1.0.0.0": {
+        "runtime": {
+          "OriginalCircuit.Mech.STEP.Tessellation.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "OriginalCircuit.Mech.STEP.Topology/1.0.0.0": {
+        "runtime": {
+          "OriginalCircuit.Mech.STEP.Topology.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "OriginalCircuit.Mech.STEP.Core/1.0.0.0": {
+        "runtime": {
+          "OriginalCircuit.Mech.STEP.Core.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "OriginalCircuit.Mech.STEP.Assembly/1.0.0.0": {
+        "runtime": {
+          "OriginalCircuit.Mech.STEP.Assembly.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
       }
     }
   },
@@ -111,6 +171,11 @@
       "serviceable": false,
       "sha512": ""
     },
+    "OriginalCircuit.Altium.Rendering.Step/2.0.0-alpha.1": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
     "OriginalCircuit.Altium.Rendering.Svg/2.0.0-alpha.1": {
       "type": "project",
       "serviceable": false,
@@ -127,6 +192,36 @@
       "sha512": ""
     },
     "OriginalCircuit.Eda.Rendering.Svg/1.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "OriginalCircuit.Mech.STEP.Geometry/1.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "OriginalCircuit.Mech.STEP.Schema/1.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "OriginalCircuit.Mech.STEP.Tessellation/1.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "OriginalCircuit.Mech.STEP.Topology/1.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "OriginalCircuit.Mech.STEP.Core/1.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "OriginalCircuit.Mech.STEP.Assembly/1.0.0.0": {
       "type": "reference",
       "serviceable": false,
       "sha512": ""

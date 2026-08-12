@@ -422,7 +422,77 @@ been tested. If a future reassignment silently fails to show up in Altium despit
 looking correct in our own reader, **check `AdditionalParameters` for any embedded
 layer reference first** — this is the pattern to look for.
 
-## 9. Testing methodology that worked well
+## 9. OpenMcdf 3.x's own name validation is stricter than the real CFB/OLE format — and applies on read, not just write
+
+**Symptom**: opening a real, valid Altium-authored `.PcbLib` threw
+`ArgumentException: Name cannot contain any of the following characters: '\', '/',
+':', '!'.` — reported against a large real-world organization library (~50MB, 601
+footprints) where this hit consistently, and the user reported it affects roughly
+75% of their organization's libraries.
+
+**Root cause**: our OLE/CFB reader (`CompoundStorage`, wrapping the `OpenMcdf`
+NuGet package) opens storages/streams by name via `Storage.TryOpenStorage`/
+`TryOpenStream`/`TryGetEntryInfo`. In OpenMcdf 3.1.4, **all of these validate the
+`name` argument up front** (`ThrowHelper.ThrowIfNameIsInvalid`, confirmed by
+reading OpenMcdf's own source at
+`github.com/openmcdf/openmcdf/blob/main/OpenMcdf/ThrowHelper.cs`), rejecting `\`,
+`/`, `:`, `!` and any name whose UTF-16 encoding exceeds the directory-entry name
+field — **even for a pure lookup of an entry that already exists on disk**. The
+real CFB/OLE spec only forbids a NUL byte and caps the name at 31 UTF-16 code
+units; the character blocklist is OpenMcdf's own added restriction, and it has no
+"raw" name-independent way to open an entry through its public API (confirmed:
+`Storage.EnumerateEntries()` returns names safely, but every actual open/lookup
+call — `TryOpenStorage`, `TryOpenStream`, `TryGetEntryInfo`, `ContainsEntry`, and
+the creating `CreateStorage`/`CreateStream` — funnels through the same check).
+Real Altium output legitimately contains entries named this way (e.g. component
+storage keys derived from part names containing `/` or other symbols); older
+tooling built directly against the raw format never had to care.
+
+**Two independent places this bites, both fixed**:
+- **Reading**: `CompoundStorage.TryGetStream`/`TryGetStorage`/`GetStorage` now
+  catch the `ArgumentException` OpenMcdf throws for an invalid name (never for a
+  null one — that still propagates as a real bug signal) and treat it exactly
+  like "entry not found". The two footprint-name-derived "preserve additional
+  streams" catch-all loops in `PcbLibReader.cs` (and the equivalent in
+  `PcbDocReader.cs`/`SchDocReader.cs`, which already had a diagnostics-warning
+  mechanism for other read failures) now skip just the one unreachable entry
+  rather than aborting the whole read.
+- **Writing**: `PcbLibWriter`/`SchLibWriter` derive each component's storage name
+  (its "section key") either from a preserved `library.SectionKeys` mapping (read
+  from the original file) or, as a fallback, by mangling the component's own name
+  (`WriterUtilities.GetSectionKeyFromName`) — and *both* paths previously only
+  replaced `/`, not `\`, `:`, `!`. A name preserved verbatim from the original
+  file can carry the same forbidden characters the read-side fix above works
+  around; there's no way to re-create an entry with that exact original name
+  either, so it has to be re-mangled on write regardless of where it came from.
+  Fixed by sanitizing (`WriterUtilities.SanitizeSectionKey`) both the fallback
+  generation path and every value copied in from a preserved `SectionKeys` map,
+  in both writers.
+
+**Verified**: the reported library now opens (601/601 footprints, zero silently
+skipped — the one entry that originally crashed the read turned out to be some
+other, non-footprint stream inside the "preserve additional streams" catch-all,
+not a footprint's own section key), and a full generate → export → re-import
+round trip on all 601 footprints succeeds.
+
+**Related, separately fixed while investigating**: Kestrel's
+`MaxRequestBodySize` and ASP.NET Core's independent `FormOptions.
+MultipartBodyLengthLimit` (a *second*, separate cap the multipart/IFormFile
+binding pipeline enforces) were both capped at 64MB — comfortably below what a
+large organization's library can reach. Exceeding either fails the request at
+the connection level before the app's own try/catch ever runs, which a browser
+reports as a bare "Failed to fetch" with no error body — as opposed to the clean
+JSON error a library-parsing failure gets. Raised both to 512MB.
+
+**Lesson**: when a widely-reported "crashes on open" bug affects a large
+fraction of real-world files but reproduces on exactly one you have in hand,
+read the *dependency's* source for the exact validation being applied (its
+NuGet page usually links the repo) rather than guessing at our own code first —
+the actual bug here was in a third-party library being stricter than the format
+it's implementing, on a code path (read-time name validation) that wouldn't be
+the first place to suspect.
+
+## 10. Testing methodology that worked well
 
 For anyone extending this further:
 

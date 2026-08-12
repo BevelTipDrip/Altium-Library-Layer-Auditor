@@ -2023,6 +2023,34 @@
             Adds a component body to the component.
             </summary>
         </member>
+        <member name="M:OriginalCircuit.Altium.Models.Pcb.PcbComponent.RemoveFill(OriginalCircuit.Altium.Models.Pcb.PcbFill)">
+            <summary>
+            Removes a fill from the component.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Models.Pcb.PcbComponent.RemoveComponentBody(OriginalCircuit.Altium.Models.Pcb.PcbComponentBody)">
+            <summary>
+            Removes a component body from the component.
+            </summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Models.Pcb.PcbComponent.RemovePad(OriginalCircuit.Altium.Models.Pcb.PcbPad)">
+            <summary>Removes a pad from the component.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Models.Pcb.PcbComponent.RemoveTrack(OriginalCircuit.Altium.Models.Pcb.PcbTrack)">
+            <summary>Removes a track from the component.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Models.Pcb.PcbComponent.RemoveVia(OriginalCircuit.Altium.Models.Pcb.PcbVia)">
+            <summary>Removes a via from the component.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Models.Pcb.PcbComponent.RemoveArc(OriginalCircuit.Altium.Models.Pcb.PcbArc)">
+            <summary>Removes an arc from the component.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Models.Pcb.PcbComponent.RemoveText(OriginalCircuit.Altium.Models.Pcb.PcbText)">
+            <summary>Removes text from the component.</summary>
+        </member>
+        <member name="M:OriginalCircuit.Altium.Models.Pcb.PcbComponent.RemoveRegion(OriginalCircuit.Altium.Models.Pcb.PcbRegion)">
+            <summary>Removes a region from the component.</summary>
+        </member>
         <member name="P:OriginalCircuit.Altium.Models.Pcb.PcbComponent.Children">
             <summary>
             Every primitive this component owns, as a single de-duplicated sequence: pads, tracks, vias, arcs,
@@ -3587,7 +3615,7 @@
             Ordered list of layer entries from top to bottom.
             </summary>
         </member>
-        <member name="M:OriginalCircuit.Altium.Models.Pcb.PcbLayerStack.FromBoardParameters(System.Collections.Generic.Dictionary{System.String,System.String})">
+        <member name="F:OriginalCircuit.Altium.Models.Pcb.PcbLayerStack.AlwaysEnabledLayers">
             <summary>
             Parses a layer stack from Board6 (or PcbLib Library/Data header) parameters. The layer index
             <c>N</c> is the same numeric PCB layer ID used everywhere else (1=Top Layer, 32=Bottom Layer,
@@ -6404,9 +6432,21 @@
         </member>
         <member name="P:OriginalCircuit.Altium.Models.Pcb.PcbText.InvertedRectJustification">
             <summary>
-            Justification / anchor of the text within its frame (the "inverted rectangle"). Uses the
-            Altium PCB encoding (<see cref="T:OriginalCircuit.Altium.Models.Pcb.PcbTextJustification"/>), which differs from the schematic
-            <c>TextJustification</c> ordering.
+            Justification / anchor point of this text relative to <see cref="P:OriginalCircuit.Altium.Models.Pcb.PcbText.Location"/> — despite the name
+            (kept for compatibility with the byte's original, narrower assumed purpose), this applies to
+            EVERY text object, not just ones with <see cref="P:OriginalCircuit.Altium.Models.Pcb.PcbText.UseInvertedRectangle"/> set. <see cref="P:OriginalCircuit.Altium.Models.Pcb.PcbText.Location"/>
+            is the text's bottom-left corner only when this is <see cref="F:OriginalCircuit.Altium.Models.Pcb.PcbTextJustification.LeftBottom"/>
+            (or <see cref="F:OriginalCircuit.Altium.Models.Pcb.PcbTextJustification.Manual"/>/unset); any other value means Location is some other
+            point in the text's own box (e.g. <see cref="F:OriginalCircuit.Altium.Models.Pcb.PcbTextJustification.CenterCenter"/> means Location
+            IS the center, so the rendered text grows symmetrically outward from it regardless of string
+            length — important for a special string like ".Designator" that gets substituted with a
+            variable-length value later). Confirmed against a user-supplied test library: two text objects
+            with identical Height/font but different Justification (5=CenterCenter, 3=LeftBottom) stored
+            different Location values for the same intended visual position, with the delta matching the
+            glyph block's own measured half-width/half-height. Uses the Altium PCB encoding
+            (<see cref="T:OriginalCircuit.Altium.Models.Pcb.PcbTextJustification"/>), which differs from the schematic <c>TextJustification</c>
+            ordering. Read/written unconditionally at offset 132 (see <c>PcbLibReader.ReadText</c> /
+            <c>PcbLibWriter</c>), not gated behind <see cref="P:OriginalCircuit.Altium.Models.Pcb.PcbText.UseInvertedRectangle"/>.
             </summary>
         </member>
         <member name="P:OriginalCircuit.Altium.Models.Pcb.PcbText.InvertedRectTextOffset">

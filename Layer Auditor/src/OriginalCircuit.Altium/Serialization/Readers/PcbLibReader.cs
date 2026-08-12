@@ -271,31 +271,42 @@ public sealed class PcbLibReader
             if (knownLibraryChildren.Contains(entry.Name))
                 continue;
 
-            // Textures / ModelsNoEmbed are reproduced as explicit empty storages (see
-            // PcbLibrary.EmptyLibrarySubStorages). Skip capturing them while empty; if a file ever has
-            // non-empty content, drop the name so it falls back to verbatim catch-all capture below.
-            if (library.EmptyLibrarySubStorages.Contains(entry.Name))
+            try
             {
-                if (entry.IsStorage && IsEmptyLibrarySubStorage(entry.AsStorage()))
-                    continue;
-                library.EmptyLibrarySubStorages.Remove(entry.Name);
-            }
-
-            if (entry.IsStream)
-            {
-                library.AdditionalLibraryStreams[entry.Name] = entry.AsStream().GetData();
-            }
-            else
-            {
-                // Preserve sub-storage streams (e.g., ComponentParamsTOC/Data)
-                var subStorage = entry.AsStorage();
-                foreach (var subEntry in subStorage.EnumerateEntries())
+                // Textures / ModelsNoEmbed are reproduced as explicit empty storages (see
+                // PcbLibrary.EmptyLibrarySubStorages). Skip capturing them while empty; if a file ever
+                // has non-empty content, drop the name so it falls back to verbatim capture below.
+                if (library.EmptyLibrarySubStorages.Contains(entry.Name))
                 {
-                    if (subEntry.IsStream)
+                    if (entry.IsStorage && IsEmptyLibrarySubStorage(entry.AsStorage()))
+                        continue;
+                    library.EmptyLibrarySubStorages.Remove(entry.Name);
+                }
+
+                if (entry.IsStream)
+                {
+                    library.AdditionalLibraryStreams[entry.Name] = entry.AsStream().GetData();
+                }
+                else
+                {
+                    // Preserve sub-storage streams (e.g., ComponentParamsTOC/Data)
+                    var subStorage = entry.AsStorage();
+                    foreach (var subEntry in subStorage.EnumerateEntries())
                     {
-                        library.AdditionalLibraryStreams[$"{entry.Name}/{subEntry.Name}"] = subEntry.AsStream().GetData();
+                        if (subEntry.IsStream)
+                        {
+                            library.AdditionalLibraryStreams[$"{entry.Name}/{subEntry.Name}"] = subEntry.AsStream().GetData();
+                        }
                     }
                 }
+            }
+            catch (KeyNotFoundException)
+            {
+                // The entry's own name contains a character OpenMcdf refuses to open by name at all
+                // (see CompoundStorage's TryGetStorage/TryGetStream remarks) -- real, if unusual,
+                // Altium-authored content we simply can't reach through this library. This is a
+                // best-effort round-trip preservation pass, so skip just this one entry rather than
+                // fail the whole read over content that was never modeled data to begin with.
             }
         }
 
@@ -487,14 +498,26 @@ public sealed class PcbLibReader
         }
     }
 
+    // OpenMcdf rejects any of these in a storage/stream name on lookup, not just on creation (see
+    // CompoundStorage.TryGetStorage/TryGetStream) -- a restriction the real CFB/OLE format doesn't
+    // itself impose, but one our own guesses need to avoid regardless.
+    private static readonly char[] InvalidSectionKeyChars = ['\\', '/', ':', '!'];
+
     private string GetSectionKeyFromRefName(string refName)
     {
         if (_sectionKeys.TryGetValue(refName, out var sectionKey))
             return sectionKey;
 
-        // Fallback: mangle name to fit compound storage limitations
+        // Fallback for a footprint with no "SectionKeys" entry: mangle the name to fit compound
+        // storage limitations. Previously only replaced '/', leaving '\', ':', '!' in place -- any of
+        // which makes the guess itself unlookupable (CompoundStorage.TryGetStorage would just treat it
+        // as "not found" rather than throw now, but a name we can trivially avoid generating shouldn't
+        // rely on that fallback).
         var maxLength = Math.Min(refName.Length, 31);
-        return refName.Substring(0, maxLength).Replace('/', '_');
+        var mangled = refName.Substring(0, maxLength);
+        foreach (var c in InvalidSectionKeyChars)
+            mangled = mangled.Replace(c, '_');
+        return mangled;
     }
 
     private PcbComponent? ReadFootprint(CompoundFileAccessor accessor, string sectionKey, CancellationToken cancellationToken = default)
@@ -535,20 +558,28 @@ public sealed class PcbLibReader
         {
             if (knownChildren.Contains(entry.Name))
                 continue;
-            if (entry.IsStream)
+
+            try
             {
-                component.AdditionalStreams[entry.Name] = entry.AsStream().GetData();
-            }
-            else
-            {
-                var subStorage = entry.AsStorage();
-                foreach (var subEntry in subStorage.EnumerateEntries())
+                if (entry.IsStream)
                 {
-                    if (subEntry.IsStream)
+                    component.AdditionalStreams[entry.Name] = entry.AsStream().GetData();
+                }
+                else
+                {
+                    var subStorage = entry.AsStorage();
+                    foreach (var subEntry in subStorage.EnumerateEntries())
                     {
-                        component.AdditionalStreams[$"{entry.Name}/{subEntry.Name}"] = subEntry.AsStream().GetData();
+                        if (subEntry.IsStream)
+                        {
+                            component.AdditionalStreams[$"{entry.Name}/{subEntry.Name}"] = subEntry.AsStream().GetData();
+                        }
                     }
                 }
+            }
+            catch (KeyNotFoundException)
+            {
+                // See the identical remark in ReadLibrary's preservation loop.
             }
         }
 

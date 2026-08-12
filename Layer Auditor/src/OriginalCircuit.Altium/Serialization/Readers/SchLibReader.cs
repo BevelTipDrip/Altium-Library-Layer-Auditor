@@ -268,14 +268,24 @@ public sealed class SchLibReader
         return componentNames;
     }
 
+    // OpenMcdf rejects any of these in a storage/stream name on lookup, not just on creation (see
+    // CompoundStorage.TryGetStorage/TryGetStream) -- a restriction the real CFB/OLE format doesn't
+    // itself impose, but one our own guesses need to avoid regardless.
+    private static readonly char[] InvalidSectionKeyChars = ['\\', '/', ':', '!'];
+
     private string GetSectionKeyFromRefName(string refName)
     {
         if (_sectionKeys.TryGetValue(refName, out var sectionKey))
             return sectionKey;
 
-        // Fallback: mangle name to fit compound storage limitations
+        // Fallback for a component with no "SectionKeys" entry: mangle the name to fit compound
+        // storage limitations. Previously only replaced '/', leaving '\', ':', '!' in place -- see
+        // PcbLibReader.GetSectionKeyFromRefName for the same fix and full rationale.
         var maxLength = Math.Min(refName.Length, 31);
-        return refName.Substring(0, maxLength).Replace('/', '_');
+        var mangled = refName.Substring(0, maxLength);
+        foreach (var c in InvalidSectionKeyChars)
+            mangled = mangled.Replace(c, '_');
+        return mangled;
     }
 
     private SchComponent? ReadComponent(CompoundFileAccessor accessor, string sectionKey, CancellationToken cancellationToken = default)

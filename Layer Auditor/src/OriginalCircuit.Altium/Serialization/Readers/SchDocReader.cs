@@ -1653,29 +1653,42 @@ public sealed class SchDocReader
 
             if (item.IsStorage)
             {
-                var childStorage = item.AsStorage();
-                foreach (var stream in accessor.EnumerateStreams(childStorage))
+                try
                 {
-                    try
+                    var childStorage = item.AsStorage();
+                    foreach (var stream in accessor.EnumerateStreams(childStorage))
                     {
-                        additional[$"{item.Name}/{stream.Name}"] = stream.GetData();
+                        try
+                        {
+                            additional[$"{item.Name}/{stream.Name}"] = stream.GetData();
+                        }
+                        catch (Exception ex) when (ex is EndOfStreamException or InvalidDataException or IOException)
+                        {
+                            _diagnostics.Add(new AltiumDiagnostic(DiagnosticSeverity.Warning, $"Failed to read stream '{item.Name}/{stream.Name}': {ex.Message}"));
+                        }
                     }
-                    catch (Exception ex) when (ex is EndOfStreamException or InvalidDataException or IOException)
-                    {
-                        _diagnostics.Add(new AltiumDiagnostic(DiagnosticSeverity.Warning, $"Failed to read stream '{item.Name}/{stream.Name}': {ex.Message}"));
-                    }
+                }
+                catch (KeyNotFoundException)
+                {
+                    // See PcbDocReader.ReadAdditionalStreams's identical remark: OpenMcdf refuses to
+                    // open some real, on-disk entry names by name at all.
+                    _diagnostics.Add(new AltiumDiagnostic(DiagnosticSeverity.Warning, $"Skipped storage '{item.Name}': its name contains a character this reader cannot open by name."));
                 }
             }
             else
             {
-                var rootStream = item.AsStream();
                 try
                 {
+                    var rootStream = item.AsStream();
                     additional[item.Name] = rootStream.GetData();
                 }
                 catch (Exception ex) when (ex is EndOfStreamException or InvalidDataException or IOException)
                 {
                     _diagnostics.Add(new AltiumDiagnostic(DiagnosticSeverity.Warning, $"Failed to read stream '{item.Name}': {ex.Message}"));
+                }
+                catch (KeyNotFoundException)
+                {
+                    _diagnostics.Add(new AltiumDiagnostic(DiagnosticSeverity.Warning, $"Skipped stream '{item.Name}': its name contains a character this reader cannot open by name."));
                 }
             }
         }

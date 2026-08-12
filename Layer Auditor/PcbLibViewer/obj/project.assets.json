@@ -78,6 +78,19 @@
           "bin/placeholder/OriginalCircuit.Altium.Rendering.Core.dll": {}
         }
       },
+      "OriginalCircuit.Altium.Rendering.Step/2.0.0-alpha.1": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "dependencies": {
+          "OriginalCircuit.Altium": "2.0.0-alpha.1"
+        },
+        "compile": {
+          "bin/placeholder/OriginalCircuit.Altium.Rendering.Step.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/OriginalCircuit.Altium.Rendering.Step.dll": {}
+        }
+      },
       "OriginalCircuit.Altium.Rendering.Svg/2.0.0-alpha.1": {
         "type": "project",
         "framework": ".NETCoreApp,Version=v10.0",
@@ -283,6 +296,11 @@
       "path": "../src/OriginalCircuit.Altium.Rendering.Core/OriginalCircuit.Altium.Rendering.Core.csproj",
       "msbuildProject": "../src/OriginalCircuit.Altium.Rendering.Core/OriginalCircuit.Altium.Rendering.Core.csproj"
     },
+    "OriginalCircuit.Altium.Rendering.Step/2.0.0-alpha.1": {
+      "type": "project",
+      "path": "../src/OriginalCircuit.Altium.Rendering.Step/OriginalCircuit.Altium.Rendering.Step.csproj",
+      "msbuildProject": "../src/OriginalCircuit.Altium.Rendering.Step/OriginalCircuit.Altium.Rendering.Step.csproj"
+    },
     "OriginalCircuit.Altium.Rendering.Svg/2.0.0-alpha.1": {
       "type": "project",
       "path": "../src/OriginalCircuit.Altium.Rendering.Svg/OriginalCircuit.Altium.Rendering.Svg.csproj",
@@ -304,6 +322,7 @@
       "Microsoft.SourceLink.GitHub >= 8.0.0",
       "OriginalCircuit.Altium >= 2.0.0-alpha.1",
       "OriginalCircuit.Altium.Rendering.Core >= 2.0.0-alpha.1",
+      "OriginalCircuit.Altium.Rendering.Step >= 2.0.0-alpha.1",
       "OriginalCircuit.Altium.Rendering.Svg >= 2.0.0-alpha.1",
       "OriginalCircuit.Eda.Abstractions >= 1.0.0-alpha.1",
       "OriginalCircuit.Eda.Rendering.Core >= 1.0.0-alpha.1"
@@ -343,6 +362,9 @@
             },
             "C:\\Users\\Ty\\Documents\\Altium Library Layer Auditor\\Layer Auditor\\src\\OriginalCircuit.Altium.Rendering.Core\\OriginalCircuit.Altium.Rendering.Core.csproj": {
               "projectPath": "C:\\Users\\Ty\\Documents\\Altium Library Layer Auditor\\Layer Auditor\\src\\OriginalCircuit.Altium.Rendering.Core\\OriginalCircuit.Altium.Rendering.Core.csproj"
+            },
+            "C:\\Users\\Ty\\Documents\\Altium Library Layer Auditor\\Layer Auditor\\src\\OriginalCircuit.Altium.Rendering.Step\\OriginalCircuit.Altium.Rendering.Step.csproj": {
+              "projectPath": "C:\\Users\\Ty\\Documents\\Altium Library Layer Auditor\\Layer Auditor\\src\\OriginalCircuit.Altium.Rendering.Step\\OriginalCircuit.Altium.Rendering.Step.csproj"
             },
             "C:\\Users\\Ty\\Documents\\Altium Library Layer Auditor\\Layer Auditor\\src\\OriginalCircuit.Altium.Rendering.Svg\\OriginalCircuit.Altium.Rendering.Svg.csproj": {
               "projectPath": "C:\\Users\\Ty\\Documents\\Altium Library Layer Auditor\\Layer Auditor\\src\\OriginalCircuit.Altium.Rendering.Svg\\OriginalCircuit.Altium.Rendering.Svg.csproj"

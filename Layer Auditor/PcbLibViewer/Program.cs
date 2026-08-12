@@ -33,8 +33,15 @@ using OriginalCircuit.Eda.Rendering;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Libraries can be several MB; allow a generous upload size.
-builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 64 * 1024 * 1024);
+// A real organization's libraries can run well past 64MB (confirmed against a user-supplied 601-
+// footprint, ~50MB library) — Kestrel's own limit and, separately, the multipart form-reader's own
+// MultipartBodyLengthLimit (a second, independent cap the IFormFile binding pipeline enforces even
+// once Kestrel's is raised) both need to allow it, or the upload fails at the connection level before
+// our own /api/upload handler ever runs — surfacing to the browser as a bare "Failed to fetch" with
+// no error body to show the user, rather than the clean JSON error a library-parsing failure gets.
+const long MaxUploadBytes = 512L * 1024 * 1024;
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = MaxUploadBytes);
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = MaxUploadBytes);
 builder.Services.AddSingleton<LibraryCache>();
 
 var app = builder.Build();

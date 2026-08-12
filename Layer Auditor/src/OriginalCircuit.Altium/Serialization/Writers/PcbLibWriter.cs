@@ -89,11 +89,14 @@ public sealed class PcbLibWriter
 
     private static void WriteSectionKeys(CompoundFileAccessor cf, PcbLibrary library, Dictionary<string, string> sectionKeys)
     {
-        // Use preserved section keys if available, otherwise generate new ones
+        // Use preserved section keys if available, otherwise generate new ones. Preserved keys are
+        // re-sanitized the same as freshly-generated ones -- a key read from the original file can
+        // itself contain characters OpenMcdf's writer won't let us create an entry with (see
+        // WriterUtilities.SanitizeSectionKey), and there's no way around re-mangling it in that case.
         if (library.SectionKeys != null && library.SectionKeys.Count > 0)
         {
             foreach (var kvp in library.SectionKeys)
-                sectionKeys[kvp.Key] = kvp.Value;
+                sectionKeys[kvp.Key] = WriterUtilities.SanitizeSectionKey(kvp.Value);
         }
 
         // Build section keys for components that need them

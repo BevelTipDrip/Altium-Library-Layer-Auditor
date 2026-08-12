@@ -37,6 +37,9 @@
             <summary>
             Lays out <paramref name="text"/> into normalized stroke segments. <paramref name="advanceWidth"/>
             receives the widest line's total advance (normalized units), for justification/measurement.
+            Public (not just an SVG-rendering detail) since callers that need to size text to fit a target
+            box — e.g. generating a centered ".Designator" string sized to fit a component body's bounds —
+            need the same measurement the renderer uses, not a re-approximation.
             </summary>
         </member>
         <member name="M:OriginalCircuit.Altium.Rendering.AltiumStrokeFont.MeasureWidth(System.String,OriginalCircuit.Altium.Rendering.AltiumStrokeFont.Style)">
@@ -301,8 +304,12 @@
             <summary>
             Renders all primitives of a PCB component, same as <see cref="M:OriginalCircuit.Altium.Rendering.PcbComponentRenderer.Render(OriginalCircuit.Altium.Models.Pcb.PcbComponent,OriginalCircuit.Eda.Rendering.IRenderContext)"/>,
             except each layer's primitives are wrapped in a named group via <see cref="M:OriginalCircuit.Eda.Rendering.IRenderContext.BeginGroup(System.String)"/>
-            (id <c>"layer-{layerId}"</c>). A vector backend (SVG) emits an addressable <c>&lt;g id="layer-33"&gt;</c>
-            per layer, so a front-end can toggle individual layers on/off after export with no server round-trip.
+            (id <c>"layer-{layerId}"</c>), and inside that, each individual primitive gets its own nested group
+            (id <c>"p-{kind}-{index}"</c>, e.g. <c>"p-Track-3"</c> — the 4th track in <see cref="P:OriginalCircuit.Altium.Models.Pcb.PcbComponent.Tracks"/>).
+            A vector backend (SVG) emits addressable <c>&lt;g id="layer-33"&gt;&lt;g id="p-Track-3"&gt;...&lt;/g&gt;&lt;/g&gt;</c>,
+            so a front-end can toggle whole layers on/off, or hit-test a click down to one primitive and look its
+            (kind, index) pair back up in the same component's own collections — with no server round-trip for
+            either.
             </summary>
             <param name="component">The PCB component to render.</param>
             <param name="context">The render context to draw into.</param>
