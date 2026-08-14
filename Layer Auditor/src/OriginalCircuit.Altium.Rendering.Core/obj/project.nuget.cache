@@ -1,16 +1,13 @@
 {
   "version": 2,
-  "dgSpecHash": "TQ0Xh+cJM3s=",
+  "dgSpecHash": "QY1w/5yOGNM=",
   "success": true,
   "projectFilePath": "C:\\Users\\Ty\\Documents\\Altium Library Layer Auditor\\Layer Auditor\\src\\OriginalCircuit.Altium.Rendering.Core\\OriginalCircuit.Altium.Rendering.Core.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\Ty\\.nuget\\packages\\microsoft.build.tasks.git\\8.0.0\\microsoft.build.tasks.git.8.0.0.nupkg.sha512",
     "C:\\Users\\Ty\\.nuget\\packages\\microsoft.sourcelink.common\\8.0.0\\microsoft.sourcelink.common.8.0.0.nupkg.sha512",
     "C:\\Users\\Ty\\.nuget\\packages\\microsoft.sourcelink.github\\8.0.0\\microsoft.sourcelink.github.8.0.0.nupkg.sha512",
-    "C:\\Users\\Ty\\.nuget\\packages\\openmcdf\\3.1.4\\openmcdf.3.1.4.nupkg.sha512",
-    "C:\\Users\\Ty\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\10.0.10\\microsoft.netcore.app.runtime.win-x64.10.0.10.nupkg.sha512",
-    "C:\\Users\\Ty\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\10.0.10\\microsoft.windowsdesktop.app.runtime.win-x64.10.0.10.nupkg.sha512",
-    "C:\\Users\\Ty\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\10.0.10\\microsoft.aspnetcore.app.runtime.win-x64.10.0.10.nupkg.sha512"
+    "C:\\Users\\Ty\\.nuget\\packages\\openmcdf\\3.1.4\\openmcdf.3.1.4.nupkg.sha512"
   ],
   "logs": []
 }
